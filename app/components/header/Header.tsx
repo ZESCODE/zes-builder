@@ -1,6 +1,7 @@
 import { useStore } from '@nanostores/react';
 import { ClientOnly } from 'remix-utils/client-only';
 import { HeaderActionButtons } from './HeaderActionButtons.client';
+import { PollinationsImageButton } from '~/components/chat/PollinationsImageButton';
 import { ChatDescription } from '~/lib/persistence/ChatDescription.client';
 import { chatStore } from '~/lib/stores/chat';
 import { classNames } from '~/utils/classNames';
@@ -20,6 +21,9 @@ export function Header() {
         <a href="/" className="text-2xl font-semibold text-accent flex items-center">
           <img src="/zes-builder-logo.svg" alt="ZES Builder" className="h-9 w-auto inline-block" />
         </a>
+      </div>
+      <div className="ml-3">
+        <PollinationsImageButton />
       </div>
       {chat.started && ( // Display ChatDescription and HeaderActionButtons only when the chat has started.
         <>

@@ -14,6 +14,12 @@ export const meta: MetaFunction = () => {
       name: 'description',
       content: 'Describe a website and ZES Builder writes, previews and deploys it in your browser.',
     },
+    { property: 'og:title', content: 'ZES Builder — AI website builder' },
+    {
+      property: 'og:description',
+      content: 'Describe a website and ZES Builder writes, previews and deploys it in your browser.',
+    },
+    { property: 'og:type', content: 'website' },
   ];
 };
 
@@ -28,11 +34,23 @@ export const loader = () => Response.json({});
 export default function Index() {
   return (
     <AccessGate>
-      <div className="flex flex-col h-full w-full bg-bolt-elements-background-depth-1">
+      <div className="relative flex flex-col h-full w-full bg-bolt-elements-background-depth-1">
         <BackgroundRays />
         <Header />
         <ClientOnly fallback={<BaseChat />}>{() => <Chat />}</ClientOnly>
         <FirstRunOnboarding />
+        <footer className="pointer-events-none absolute bottom-1 right-3 z-10 text-[11px] text-bolt-elements-textTertiary">
+          Powered by{' '}
+          <a
+            href="https://zes.codes"
+            className="pointer-events-auto hover:text-accent-500"
+            target="_blank"
+            rel="noreferrer"
+          >
+            ZES.codes
+          </a>{' '}
+          · Built on bolt.diy
+        </footer>
       </div>
     </AccessGate>
   );
