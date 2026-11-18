@@ -35,6 +35,8 @@ export default [
   { file: 'routes/api.gitlab-projects.ts', path: '/api/gitlab-projects' },
   { file: 'routes/api.health.ts', path: '/api/health' },
   { file: 'routes/api.image.pollinations.ts', path: '/api/image/pollinations' },
+  { file: 'routes/api.hub.deploy.ts', path: '/api/hub/deploy' },
+  { file: 'routes/api.hub.qc.ts', path: '/api/hub/qc' },
   { file: 'routes/api.llmcall.ts', path: '/api/llmcall' },
   { file: 'routes/api.mcp-check.ts', path: '/api/mcp-check' },
   { file: 'routes/api.mcp-update-config.ts', path: '/api/mcp-update-config' },

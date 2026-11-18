@@ -7,6 +7,7 @@ export function PollinationsImageButton() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [qc, setQc] = useState<{ passed: boolean; averageScore: number } | null>(null);
 
   async function generate() {
     if (!prompt.trim() || loading) {
@@ -15,6 +16,7 @@ export function PollinationsImageButton() {
 
     setLoading(true);
     setError(null);
+    setQc(null);
 
     try {
       const response = await fetch('/api/image/pollinations', {
@@ -29,12 +31,28 @@ export function PollinationsImageButton() {
       }
 
       const blob = await response.blob();
+      const sourceUrl = response.headers.get('X-Pollinations-Image-Url');
 
       if (imageUrl) {
         URL.revokeObjectURL(imageUrl);
       }
 
       setImageUrl(URL.createObjectURL(blob));
+
+      void fetch('/api/hub/qc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: sourceUrl, prompt: prompt.trim() }),
+      })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((value) => {
+          const payload = value as { averageScore?: number; passed?: boolean } | null;
+
+          if (payload && typeof payload.averageScore === 'number') {
+            setQc({ passed: Boolean(payload.passed), averageScore: payload.averageScore });
+          }
+        })
+        .catch(() => undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Image generation failed');
     } finally {
@@ -111,6 +129,17 @@ export function PollinationsImageButton() {
                   Download
                 </a>
               </div>
+            )}
+
+            {qc && (
+              <span
+                className={classNames(
+                  'self-start rounded-full px-2 py-0.5 text-[11px]',
+                  qc.passed ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400',
+                )}
+              >
+                {qc.passed ? `QC passed · ${qc.averageScore}` : `QC failed · ${qc.averageScore} — Regenerate?`}
+              </span>
             )}
 
             <p className="text-[11px] text-bolt-elements-textTertiary">
