@@ -18,7 +18,11 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
 
     fetch('/api/whop/session', { headers: { Accept: 'application/json' } })
       .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
-      .then((data: Session) => alive && setSession(data))
+      .then((data) => {
+        if (alive) {
+          setSession(data as Session);
+        }
+      })
       .catch(() => alive && setFailed(true));
 
     return () => {

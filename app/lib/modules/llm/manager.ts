@@ -266,10 +266,17 @@ export class LLMManager {
 
   getDefaultProvider(): BaseProvider {
     /*
-     * Prefer OpenRouter explicitly. Registration order follows the export
-     * order of ./registry, which would otherwise make the default depend on
-     * which provider happens to be listed first.
+     * Prefer Pollinations: it is the free-tier provider shipped with ZES
+     * Builder. Registration order follows the export order of ./registry,
+     * which would otherwise make the default depend on which provider happens
+     * to be listed first.
      */
+    const pollinations = this._providers.get('Pollinations');
+
+    if (pollinations) {
+      return pollinations;
+    }
+
     const openRouter = this._providers.get('OpenRouter');
 
     if (openRouter) {

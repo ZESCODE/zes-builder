@@ -1,8 +1,8 @@
-# bolt.diy
+# ZES Builder
 
 [![bolt.diy: AI-Powered Full-Stack Web Development in the Browser](./public/social_preview_index(1).jpg)](https://bolt.diy)
 
-Welcome to **bolt.diy**, the open-source AI developer workspace that lets you select your preferred LLM for every prompt. Build full-stack web applications in the browser with support for 22+ model providers (OpenAI, Anthropic, Gemini, Groq, xAI, DeepSeek, Ollama, LM Studio, and more), or extend it with any provider supported by the Vercel AI SDK. OpenRouter, Anthropic, OpenAI, and Google are enabled by default; enable and configure other providers in Settings.
+ZES Builder is the [ZES.codes](https://zes.codes) distribution of **bolt.diy**, the open-source AI developer workspace that lets you select your preferred LLM for every prompt. Build full-stack web applications in the browser with support for 22+ model providers (OpenAI, Anthropic, Gemini, Groq, xAI, DeepSeek, Ollama, LM Studio, and more), or extend it with any provider supported by the Vercel AI SDK. OpenRouter, Anthropic, OpenAI, and Google are enabled by default; enable and configure other providers in Settings.
 
 [Documentation](https://stackblitz-labs.github.io/bolt.diy/) | [FAQ & Troubleshooting](FAQ.md)
 
@@ -14,6 +14,8 @@ bolt.diy was originally started by [Cole Medin](https://www.youtube.com/@ColeMed
 
 ## Table of Contents
 
+- [ZES Builder Setup](#zes-builder-setup)
+
 - [Quick Start](#quick-start)
 - [Running with Docker](#running-with-docker)
 - [Desktop App (Electron)](#desktop-app-electron)
@@ -23,6 +25,39 @@ bolt.diy was originally started by [Cole Medin](https://www.youtube.com/@ColeMed
 - [Available Scripts](#available-scripts)
 - [Contributing & Community](#contributing--community)
 - [Licensing](#licensing)
+
+---
+
+## ZES Builder Setup
+
+ZES Builder ships **Pollinations** as the default provider, so a fresh install can build
+without configuring another vendor first.
+
+1. Copy `.env.example` to `.env.local`.
+2. Set `POLLINATIONS_API_KEY` (or leave it empty and sign in from **Settings → Providers**
+   to paste a key in the browser).
+3. Run `pnpm dev` and open <http://localhost:5173>.
+
+| Setting | Default | Notes |
+| --- | --- | --- |
+| Text gateway | `https://gen.pollinations.ai/v1` | Override with `POLLINATIONS_API_BASE_URL` |
+| Default model | `openai` | Aliases: `openai-fast`, `gemini`, `mistral` |
+| Image gateway | `https://image.pollinations.ai/prompt` | Override with `POLLINATIONS_IMAGE_BASE_URL` |
+
+### Image generation
+
+The header **Image** button generates assets server-side through
+`POST/GET /api/image/pollinations`. The API key never reaches the browser. Provide a
+`prompt` (query for GET, JSON body for POST) plus optional `width`, `height`, `seed`
+and `model`.
+
+### Deployment
+
+- Vercel: `vercel --prod` (see [docs/deployment-vercel.md](docs/deployment-vercel.md))
+- Cloudflare: `pnpm deploy` (wrangler)
+
+Pollinations is added alongside every existing provider; nothing from upstream bolt.diy
+was removed.
 
 ---
 
