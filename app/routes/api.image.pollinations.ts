@@ -42,7 +42,9 @@ async function generate(prompt: string, params: URLSearchParams): Promise<Respon
     return Response.json({ error: 'A prompt is required' }, { status: 400 });
   }
 
-  const upstream = await fetch(buildUrl(prompt.trim(), params), {
+  const sourceUrl = buildUrl(prompt.trim(), params);
+
+  const upstream = await fetch(sourceUrl, {
     signal: AbortSignal.timeout(60_000),
   });
 
@@ -54,6 +56,7 @@ async function generate(prompt: string, params: URLSearchParams): Promise<Respon
     headers: {
       'Content-Type': upstream.headers.get('Content-Type') || 'image/jpeg',
       'Cache-Control': 'public, max-age=300',
+      'X-Pollinations-Image-Url': sourceUrl,
     },
   });
 }

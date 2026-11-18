@@ -9,6 +9,7 @@ import { useGitLabDeploy } from '~/components/deploy/GitLabDeploy.client';
 import { GitLabDeploymentDialog } from '~/components/deploy/GitLabDeploymentDialog';
 import { useNetlifyDeploy } from '~/components/deploy/NetlifyDeploy.client';
 import { useVercelDeploy } from '~/components/deploy/VercelDeploy.client';
+import { ZesDeployDialog } from '~/components/deploy/ZesDeployDialog';
 import { isGitLabConnected } from '~/lib/stores/gitlabConnection';
 import { netlifyConnection } from '~/lib/stores/netlify';
 import { streamingState } from '~/lib/stores/streaming';
@@ -48,6 +49,7 @@ export const DeployButton = ({
   const [gitlabDeploymentFiles, setGitlabDeploymentFiles] = useState<Record<string, string> | null>(null);
   const [githubProjectName, setGithubProjectName] = useState('');
   const [gitlabProjectName, setGitlabProjectName] = useState('');
+  const [zesDialog, setZesDialog] = useState<'free' | 'premium' | null>(null);
 
   const handleVercelDeployClick = async () => {
     setIsDeploying(true);
@@ -235,23 +237,28 @@ export const DeployButton = ({
               <span className="mx-auto">{!gitlabIsConnected ? 'No GitLab Account Connected' : 'Deploy to GitLab'}</span>
             </DropdownMenu.Item>
 
+            <DropdownMenu.Separator className="my-1 h-px bg-bolt-elements-borderColor" />
+
             <DropdownMenu.Item
-              disabled
-              className="flex items-center w-full rounded-md px-4 py-2 text-sm text-bolt-elements-textTertiary gap-2 opacity-60 cursor-not-allowed"
+              className="cursor-pointer flex items-center w-full px-4 py-2 text-sm text-bolt-elements-textPrimary hover:bg-bolt-elements-item-backgroundActive gap-2 rounded-md"
+              onClick={() => setZesDialog('free')}
             >
-              <img
-                className="w-5 h-5"
-                height="24"
-                width="24"
-                crossOrigin="anonymous"
-                src="https://cdn.simpleicons.org/cloudflare"
-                alt="cloudflare"
-              />
-              <span className="mx-auto">Deploy to Cloudflare (Coming Soon)</span>
+              <div className="i-ph:cloud-arrow-up w-5 h-5 text-accent-500" />
+              <span className="mx-auto">Deploy to ZES (Free)</span>
+            </DropdownMenu.Item>
+
+            <DropdownMenu.Item
+              className="cursor-pointer flex items-center w-full px-4 py-2 text-sm text-bolt-elements-textPrimary hover:bg-bolt-elements-item-backgroundActive gap-2 rounded-md"
+              onClick={() => setZesDialog('premium')}
+            >
+              <div className="i-ph:rocket-launch w-5 h-5 text-accent-500" />
+              <span className="mx-auto">Deploy to ZES (Premium)</span>
             </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Root>
       </div>
+
+      {zesDialog && <ZesDeployDialog open kind={zesDialog} onClose={() => setZesDialog(null)} />}
 
       {/* GitHub Deployment Dialog */}
       {showGitHubDeploymentDialog && githubDeploymentFiles && (

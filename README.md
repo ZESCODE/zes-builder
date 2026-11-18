@@ -56,6 +56,20 @@ and `model`.
 - Vercel: `vercel --prod` (see [docs/deployment-vercel.md](docs/deployment-vercel.md))
 - Cloudflare: `pnpm deploy` (wrangler)
 
+### ZES Agent Hub
+
+The **Deploy** menu can publish the site through the ZES agent hub:
+
+| Route | Purpose |
+| --- | --- |
+| `POST /api/hub/deploy` | Server-side proxy for `/api/pipeline/free` and `/api/pipeline/premium` |
+| `POST /api/hub/qc` | Server-side proxy for `/api/qc/check` (image QC) |
+
+Set `HUB_URL` (default `https://hub.zes.codes`) and `AGORA_HUB_ADMIN_KEY` in the
+server environment. Both are read only inside the resource routes, so neither value
+reaches the browser bundle. The hub renders the site, runs the image QC Council and
+returns the live URL, which the dialog offers to copy.
+
 Pollinations is added alongside every existing provider; nothing from upstream bolt.diy
 was removed.
 
