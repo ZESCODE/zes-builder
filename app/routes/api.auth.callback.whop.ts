@@ -15,7 +15,7 @@ import {
 type Pkce = { state: string; verifier: string; nonce: string; next: string };
 
 function fail(reason: string) {
-  return redirect(`/signin?error=${encodeURIComponent(reason)}`, {
+  return redirect(`/?whop_error=${encodeURIComponent(reason)}`, {
     headers: { 'Set-Cookie': clearCookie(PKCE_COOKIE) },
   });
 }
