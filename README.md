@@ -73,6 +73,22 @@ returns the live URL, which the dialog offers to copy.
 Pollinations is added alongside every existing provider; nothing from upstream bolt.diy
 was removed.
 
+### ZAP v1 Orchestration
+
+The **/zap** page drives ZAP v1 jobs on the hub: create a job, let Castor plan it
+into task contracts, and run the tasks through the routed models.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/zap/jobs` | List hub jobs |
+| `POST /api/zap/jobs/create` | Create a job |
+| `GET /api/zap/jobs/:jobId` | Job detail with model usage |
+| `POST /api/zap/jobs/:jobId/run` | `plan` the job or `run` the next task |
+
+These routes are server-side proxies to the hub's `/api/v1` API and reuse the same
+`HUB_URL` and `AGORA_HUB_ADMIN_KEY` settings, so the hub key never reaches the
+browser.
+
 ---
 
 ## Quick Start
