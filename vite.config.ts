@@ -217,7 +217,13 @@ export default defineConfig((config) => {
        * package is CommonJS and exposes no named `Buffer` export.
        */
       browserPolyfills(),
-      config.mode !== 'test' && cloudflare({ viteEnvironment: { name: 'ssr' } }),
+      /*
+       * The Cloudflare plugin replaces the server entry with a Worker bundle.
+       * On Vercel that bundle is loaded as a Node function and crashes
+       * (`Cannot read properties of undefined (reading 'v8_middleware')`), so let
+       * React Router emit the normal Node server build there instead.
+       */
+      config.mode !== 'test' && !process.env.VERCEL && cloudflare({ viteEnvironment: { name: 'ssr' } }),
       config.mode !== 'test' && reactRouter(),
       UnoCSS(),
       chrome129IssuePlugin(),
