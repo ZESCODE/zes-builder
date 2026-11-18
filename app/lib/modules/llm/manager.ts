@@ -12,6 +12,7 @@ const logger = createScopedLogger('LLMManager');
  * unregistered, so its models never reach the model picker.
  */
 const ENABLED_PROVIDERS = new Set([
+  'Pollinations',
   'OpenRouter',
   'Anthropic',
   'OpenAI',
