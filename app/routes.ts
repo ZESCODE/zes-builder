@@ -51,4 +51,8 @@ export default [
   { file: 'routes/api.vercel-deploy.ts', path: '/api/vercel-deploy' },
   { file: 'routes/api.vercel-user.ts', path: '/api/vercel-user' },
   { file: 'routes/api.web-search.ts', path: '/api/web-search' },
+  { file: 'routes/api.auth.whop.ts', path: '/api/auth/whop' },
+  { file: 'routes/api.auth.callback.whop.ts', path: '/api/auth/callback/whop' },
+  { file: 'routes/api.auth.logout.ts', path: '/api/auth/logout' },
+  { file: 'routes/api.whop.session.ts', path: '/api/whop/session' },
 ] satisfies RouteConfig;
