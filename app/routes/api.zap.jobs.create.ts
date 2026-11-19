@@ -13,6 +13,8 @@ export async function action({ request }: { request: Request }) {
     title?: string;
     objective?: string;
     workflowType?: string;
+    workflowId?: string;
+    workflowVersion?: number;
   };
 
   if (!body.title || !body.objective) {
@@ -24,6 +26,8 @@ export async function action({ request }: { request: Request }) {
       title: body.title,
       objective: body.objective,
       workflowType: body.workflowType,
+      workflowId: body.workflowId,
+      workflowVersion: body.workflowVersion,
     });
 
     return Response.json(result.data, { status: result.status });
