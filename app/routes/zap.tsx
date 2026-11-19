@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { MetaFunction } from 'react-router';
 import { Header } from '~/components/header/Header';
 import BackgroundRays from '~/components/ui/BackgroundRays';
@@ -17,6 +17,16 @@ type JobRow = {
   objective: string;
   status: string;
   created_at: string;
+};
+
+type ApprovalRow = {
+  id: string;
+  job_id: string;
+  task_id: string | null;
+  action_type: string;
+  action_description: string;
+  status: string;
+  expires_at: string | null;
 };
 
 type TaskRow = {
@@ -59,10 +69,54 @@ export default function ZapDashboard() {
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalRow[]>([]);
   const [title, setTitle] = useState('');
   const [objective, setObjective] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const loadApprovals = useCallback(async () => {
+    const response = await fetch('/api/zap/approvals');
+    const body = (await response.json().catch(() => ({}))) as { approvals?: ApprovalRow[]; error?: string };
+
+    if (!response.ok) {
+      return;
+    }
+
+    setApprovals(Array.isArray(body.approvals) ? body.approvals : []);
+  }, []);
+
+  useEffect(() => {
+    void loadJobs();
+    void loadApprovals();
+  }, [loadApprovals]);
+
+  async function decide(approvalId: string, decision: 'approve' | 'reject') {
+    setBusy(true);
+    setError(null);
+
+    const response = await fetch(`/api/zap/approvals/${approvalId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    });
+
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+
+    setBusy(false);
+
+    if (!response.ok) {
+      setError(body.error || 'Failed to record the decision');
+      return;
+    }
+
+    await loadApprovals();
+    await loadJobs();
+
+    if (selected) {
+      await openJob(selected);
+    }
+  }
 
   async function loadJobs() {
     setError(null);
@@ -241,11 +295,57 @@ export default function ZapDashboard() {
             </p>
           )}
 
+          {approvals.length > 0 && (
+            <section className="mt-6 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
+              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-amber-300">
+                Approvals waiting ({approvals.length})
+              </h2>
+              <ul className="flex flex-col gap-2">
+                {approvals.map((approval) => (
+                  <li
+                    key={approval.id}
+                    className="flex flex-wrap items-center gap-3 rounded-md border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1/60 px-3 py-2"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm">{approval.action_description}</p>
+                      <p className="text-xs text-bolt-elements-textSecondary">
+                        {approval.action_type} · job {approval.job_id.slice(0, 8)}
+                        {approval.expires_at ? ` · expires ${new Date(approval.expires_at).toLocaleString()}` : ''}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => decide(approval.id, 'approve')}
+                      disabled={busy}
+                      className="rounded-md bg-emerald-500 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => decide(approval.id, 'reject')}
+                      disabled={busy}
+                      className="rounded-md border border-red-500/50 px-3 py-1.5 text-sm text-red-300 disabled:opacity-40"
+                    >
+                      Reject
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           {selected && (
             <section className="mt-6 rounded-lg border border-bolt-elements-borderColor p-4 bg-bolt-elements-background-depth-1/60">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-bolt-elements-textSecondary">Plan</h2>
                 <div className="flex gap-2">
+                  <a
+                    href={`/zap/canvas?job=${selected}`}
+                    className="rounded-md border border-bolt-elements-borderColor px-3 py-1.5 text-sm hover:border-blue-400/60"
+                  >
+                    View run
+                  </a>
                   <button
                     type="button"
                     onClick={() => orchestrate('plan')}

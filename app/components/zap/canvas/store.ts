@@ -50,6 +50,8 @@ type CanvasState = {
   edges: Edge[];
   descriptors: Record<string, NodeTypeDescriptor>;
   selectedNodeId: string | null;
+  runStatus: Record<string, string>;
+  runJobId: string | null;
   issues: ValidationIssue[];
   notice: string | null;
   error: string | null;
@@ -65,6 +67,7 @@ type CanvasState = {
   onEdgesChange: (changes: EdgeChange[]) => void;
   connect: (connection: { source?: string | null; target?: string | null; sourceHandle?: string | null }) => void;
   select: (nodeId: string | null) => void;
+  setRunStatus: (jobId: string | null, status: Record<string, string>) => void;
   setName: (name: string) => void;
   setExecution: (execution: Partial<WorkflowDefinition['execution']>) => void;
   setBudget: (budget: Partial<WorkflowDefinition['budget']>) => void;
@@ -124,6 +127,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   edges: [],
   descriptors: {},
   selectedNodeId: null,
+  runStatus: {},
+  runJobId: null,
   issues: [],
   notice: null,
   error: null,
@@ -248,6 +253,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   select: (nodeId) => set({ selectedNodeId: nodeId }),
+
+  setRunStatus: (jobId, status) => set({ runJobId: jobId, runStatus: status }),
 
   setName: (name) => set({ name }),
 

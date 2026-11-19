@@ -10,7 +10,7 @@ export const meta: MetaFunction = () => {
   return [{ title: 'Edit workflow — ZES' }];
 };
 
-export async function loader({ params }: { params: { workflowId?: string } }) {
+export async function loader({ params, request }: { params: { workflowId?: string }; request: Request }) {
   if (!hubConfigured()) {
     return Response.json({ descriptors: [] as NodeTypeDescriptor[], error: 'Hub is not configured' });
   }
@@ -22,12 +22,14 @@ export async function loader({ params }: { params: { workflowId?: string } }) {
     return Response.json({
       descriptors: data.nodeTypes ?? [],
       workflowId: params.workflowId ?? null,
+      jobId: new URL(request.url).searchParams.get('job'),
       error: data.error ?? null,
     });
   } catch (error) {
     return Response.json({
       descriptors: [] as NodeTypeDescriptor[],
       workflowId: params.workflowId ?? null,
+      jobId: new URL(request.url).searchParams.get('job'),
       error: error instanceof Error ? error.message : 'Failed to load node types',
     });
   }
@@ -36,7 +38,12 @@ export async function loader({ params }: { params: { workflowId?: string } }) {
 export default function ZapCanvasEditRoute({
   loaderData,
 }: {
-  loaderData: { descriptors: NodeTypeDescriptor[]; workflowId: string | null; error: string | null };
+  loaderData: {
+    descriptors: NodeTypeDescriptor[];
+    workflowId: string | null;
+    jobId: string | null;
+    error: string | null;
+  };
 }) {
   return (
     <AccessGate>
@@ -51,6 +58,7 @@ export default function ZapCanvasEditRoute({
                 <WorkflowCanvasRoot
                   descriptors={loaderData.descriptors}
                   workflowId={loaderData.workflowId ?? undefined}
+                  jobId={loaderData.jobId ?? undefined}
                 />
               )}
             </ClientOnly>
