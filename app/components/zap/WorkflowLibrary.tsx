@@ -13,7 +13,8 @@ type WorkflowRow = {
 type VersionRow = {
   version: number;
   status: string;
-  createdAt: string;
+  createdAt?: string;
+  created_at?: string;
 };
 
 function statusTone(status: string): string {
@@ -193,7 +194,7 @@ export function WorkflowLibrary({ onJobStarted }: { onJobStarted?: (jobId: strin
                         {version.status}
                       </span>
                       <span className="text-bolt-elements-textTertiary">
-                        {new Date(version.createdAt).toLocaleString()}
+                        {new Date(version.createdAt ?? version.created_at ?? Date.now()).toLocaleString()}
                       </span>
                     </li>
                   ))}
