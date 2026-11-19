@@ -36,6 +36,14 @@ function statusTone(status: string): string {
     return 'text-red-400';
   }
 
+  if (status === 'skipped') {
+    return 'text-slate-500';
+  }
+
+  if (status === 'paused' || status === 'blocked' || status === 'waiting_approval') {
+    return 'text-purple-400';
+  }
+
   if (status === 'running') {
     return 'text-blue-400';
   }

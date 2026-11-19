@@ -253,6 +253,38 @@ export function validateDefinition(definition: WorkflowDefinition): ValidationIs
     }
   }
 
+  for (const node of definition.nodes) {
+    if (node.type !== 'condition') {
+      continue;
+    }
+
+    const outgoing = definition.edges.filter((edge) => edge.source === node.id);
+    const config = node.config as ConditionNodeConfig;
+    const handles = [config.trueHandle, config.falseHandle];
+
+    if (outgoing.length === 0) {
+      issues.push({ path: `nodes.${node.id}`, message: 'A condition needs both a true and a false edge.' });
+    }
+
+    for (const handle of handles) {
+      if (!outgoing.some((edge) => edge.sourceHandle === handle)) {
+        issues.push({
+          path: `nodes.${node.id}`,
+          message: `Connect the "${handle}" handle to continue that branch.`,
+        });
+      }
+    }
+
+    for (const edge of outgoing) {
+      if (edge.sourceHandle && !handles.includes(edge.sourceHandle)) {
+        issues.push({
+          path: `edges.${edge.id}`,
+          message: 'Condition edges must start from the true or false handle.',
+        });
+      }
+    }
+  }
+
   if (
     hasCycle(
       definition.nodes.map((node) => node.id),
