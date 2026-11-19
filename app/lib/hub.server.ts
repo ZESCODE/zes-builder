@@ -158,6 +158,22 @@ export async function zapPauseJob(jobId: string, reason?: string) {
   return hubFetch(`/api/v1/jobs/${encodeURIComponent(jobId)}/pause`, reason ? { reason } : {});
 }
 
+export async function zapListApprovals() {
+  return hubGet('/api/v1/approvals');
+}
+
+export async function zapDecideApproval(
+  approvalId: string,
+  decision: 'approve' | 'reject',
+  decidedBy: string,
+  decisionReason?: string,
+) {
+  return hubFetch(`/api/v1/approvals/${encodeURIComponent(approvalId)}/${decision}`, {
+    decidedBy,
+    ...(decisionReason ? { decisionReason } : {}),
+  });
+}
+
 export async function zapResumeJob(jobId: string) {
   return hubFetch(`/api/v1/jobs/${encodeURIComponent(jobId)}/resume`, {});
 }

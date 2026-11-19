@@ -45,6 +45,8 @@ export default [
   { file: 'routes/api.zap.jobs.$jobId.ts', path: '/api/zap/jobs/:jobId' },
   { file: 'routes/api.zap.jobs.$jobId.run.ts', path: '/api/zap/jobs/:jobId/run' },
   { file: 'routes/api.zap.jobs.$jobId.graph.ts', path: '/api/zap/jobs/:jobId/graph' },
+  { file: 'routes/api.zap.approvals.ts', path: '/api/zap/approvals' },
+  { file: 'routes/api.zap.approvals.$approvalId.ts', path: '/api/zap/approvals/:approvalId' },
   { file: 'routes/api.zap.node-types.ts', path: '/api/zap/node-types' },
   { file: 'routes/api.zap.workflows.ts', path: '/api/zap/workflows' },
   { file: 'routes/api.zap.workflows.$workflowId.ts', path: '/api/zap/workflows/:workflowId' },

@@ -30,9 +30,10 @@ function asRecord(value: unknown): JsonRecord {
 type Props = {
   descriptors: NodeTypeDescriptor[];
   workflowId?: string;
+  jobId?: string;
 };
 
-export function WorkflowCanvas({ descriptors, workflowId }: Props) {
+export function WorkflowCanvas({ descriptors, workflowId, jobId }: Props) {
   const store = useCanvasStore();
   const { screenToFlowPosition } = useReactFlow();
   const loaded = useRef(false);
@@ -71,6 +72,28 @@ export function WorkflowCanvas({ descriptors, workflowId }: Props) {
       })
       .catch((error: Error) => toast.error(error.message));
   }, [workflowId]);
+
+  useEffect(() => {
+    if (!jobId) {
+      return;
+    }
+
+    fetch(`/api/zap/jobs/${encodeURIComponent(jobId)}/graph`)
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error('Run not found'))))
+      .then((raw) => {
+        const data = asRecord(raw) as { tasks?: Array<{ nodeId?: string; status?: string }> };
+        const status: Record<string, string> = {};
+
+        for (const task of data.tasks ?? []) {
+          if (task.nodeId && task.status) {
+            status[task.nodeId] = task.status;
+          }
+        }
+
+        useCanvasStore.getState().setRunStatus(jobId, status);
+      })
+      .catch((error: Error) => toast.error(error.message));
+  }, [jobId]);
 
   const onConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target) {
@@ -313,6 +336,7 @@ export function WorkflowCanvas({ descriptors, workflowId }: Props) {
       </div>
 
       <footer className="flex items-center gap-3 border-t border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 px-3 py-1.5 text-[11px] text-bolt-elements-textTertiary">
+        {store.runJobId ? <span className="text-blue-300">run overlay on</span> : null}
         <span>{store.nodes.length} nodes</span>
         <span>{store.edges.length} edges</span>
         {store.error ? <span className="text-red-400">{store.error}</span> : null}
