@@ -8,6 +8,7 @@ import { Links, Meta, Outlet, Scripts, ScrollRestoration, type LinksFunction } f
 import { cssTransition, ToastContainer } from 'react-toastify';
 
 import reactToastifyStyles from 'react-toastify/dist/ReactToastify.css?url';
+import reactFlowStyles from '@xyflow/react/dist/style.css?url';
 import { ClientOnly } from 'remix-utils/client-only';
 
 import 'virtual:uno.css';
@@ -31,6 +32,7 @@ export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: tailwindReset },
   { rel: 'stylesheet', href: globalStyles },
   { rel: 'stylesheet', href: xtermStyles },
+  { rel: 'stylesheet', href: reactFlowStyles },
   {
     rel: 'preconnect',
     href: 'https://fonts.googleapis.com',

@@ -107,3 +107,55 @@ export async function zapJobUsage(jobId: string) {
 export async function zapListAgents() {
   return hubGet('/api/v1/agents');
 }
+
+export async function zapListWorkflows() {
+  return hubGet('/api/v1/workflows');
+}
+
+export async function zapGetWorkflow(workflowId: string) {
+  return hubGet(`/api/v1/workflows/${encodeURIComponent(workflowId)}`);
+}
+
+export async function zapWorkflowVersions(workflowId: string) {
+  return hubGet(`/api/v1/workflows/${encodeURIComponent(workflowId)}/versions`);
+}
+
+export async function zapCreateWorkflow(definition: unknown) {
+  return hubFetch('/api/v1/workflows', definition);
+}
+
+export async function zapUpdateWorkflow(workflowId: string, definition: unknown) {
+  const response = await fetch(`${hubUrl()}/api/v1/workflows/${encodeURIComponent(workflowId)}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${hubKey()}`,
+    },
+    body: JSON.stringify(definition),
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  const data = await response.json().catch(() => ({ error: `Hub returned ${response.status}` }));
+
+  return { status: response.status, data };
+}
+
+export async function zapPublishWorkflow(workflowId: string, version?: number) {
+  return hubFetch(`/api/v1/workflows/${encodeURIComponent(workflowId)}/publish`, version ? { version } : {});
+}
+
+export async function zapNodeTypes() {
+  return hubGet('/api/v1/node-types');
+}
+
+export async function zapJobGraph(jobId: string) {
+  return hubGet(`/api/v1/jobs/${encodeURIComponent(jobId)}/graph`);
+}
+
+export async function zapPauseJob(jobId: string, reason?: string) {
+  return hubFetch(`/api/v1/jobs/${encodeURIComponent(jobId)}/pause`, reason ? { reason } : {});
+}
+
+export async function zapResumeJob(jobId: string) {
+  return hubFetch(`/api/v1/jobs/${encodeURIComponent(jobId)}/resume`, {});
+}
