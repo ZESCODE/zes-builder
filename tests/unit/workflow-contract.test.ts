@@ -128,9 +128,48 @@ describe('workflow contract', () => {
   it('requires a verifier when acceptance criteria are set', () => {
     const definition = workflow({ acceptanceCriteria: ['Something must hold'] });
     definition.nodes = definition.nodes.filter((node) => node.type !== 'verifier');
-    definition.edges = [{ id: 'e1', source: 'castor_1', target: 'john_2' }, { id: 'e2', source: 'john_2', target: 'output_3' }];
+    definition.edges = [
+      { id: 'e1', source: 'castor_1', target: 'john_2' },
+      { id: 'e2', source: 'john_2', target: 'output_3' },
+    ];
 
     expect(validateDefinition(definition).some((issue) => issue.path === 'acceptanceCriteria')).toBe(true);
+  });
+
+  it('requires both condition handles to be connected', () => {
+    const definition = workflow();
+    definition.nodes.splice(2, 0, {
+      id: 'condition_3',
+      type: 'condition',
+      position: { x: 300, y: 0 },
+      config: { expression: 'inputs.ok === true', trueHandle: 'true', falseHandle: 'false' },
+    });
+    definition.edges = [
+      { id: 'e1', source: 'castor_1', target: 'john_2' },
+      { id: 'e2', source: 'john_2', target: 'condition_3' },
+      { id: 'e3', source: 'condition_3', target: 'output_3', sourceHandle: 'true' },
+    ];
+
+    const messages = validateDefinition(definition).map((issue) => issue.message);
+    expect(messages.some((message) => /"false" handle/.test(message))).toBe(true);
+  });
+
+  it('accepts a condition with both branches wired', () => {
+    const definition = workflow();
+    definition.nodes.splice(2, 0, {
+      id: 'condition_3',
+      type: 'condition',
+      position: { x: 300, y: 0 },
+      config: { expression: 'inputs.ok === true', trueHandle: 'true', falseHandle: 'false' },
+    });
+    definition.edges = [
+      { id: 'e1', source: 'castor_1', target: 'john_2' },
+      { id: 'e2', source: 'john_2', target: 'condition_3' },
+      { id: 'e3', source: 'condition_3', target: 'output_3', sourceHandle: 'true' },
+      { id: 'e4', source: 'condition_3', target: 'output_3', sourceHandle: 'false' },
+    ];
+
+    expect(validateDefinition(definition)).toEqual([]);
   });
 
   it('never emits a model or permission in the payload', () => {
