@@ -102,6 +102,19 @@ export async function zapRunNext(jobId: string, workerId?: string) {
   return hubFetch(`/api/v1/jobs/${encodeURIComponent(jobId)}/run-next`, workerId ? { workerId } : {});
 }
 
+export async function zapJobTasks(jobId: string) {
+  return hubGet(`/api/v1/jobs/${encodeURIComponent(jobId)}/tasks`);
+}
+
+export async function zapJobArtifacts(jobId: string) {
+  return hubGet(`/api/v1/jobs/${encodeURIComponent(jobId)}/artifacts`);
+}
+
+export async function zapJobEvents(jobId: string, after?: string | null) {
+  const query = after ? `?limit=200&after=${encodeURIComponent(after)}` : '?limit=200';
+  return hubGet(`/api/v1/jobs/${encodeURIComponent(jobId)}/events${query}`);
+}
+
 export async function zapJobUsage(jobId: string) {
   return hubGet(`/api/v1/jobs/${encodeURIComponent(jobId)}/usage`);
 }

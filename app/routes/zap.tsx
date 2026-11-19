@@ -3,6 +3,7 @@ import type { MetaFunction } from 'react-router';
 import { Header } from '~/components/header/Header';
 import BackgroundRays from '~/components/ui/BackgroundRays';
 import { AccessGate } from '~/components/whop/AccessGate';
+import { RunDetail } from '~/components/zap/RunDetail';
 import { WorkflowLibrary } from '~/components/zap/WorkflowLibrary';
 
 export const meta: MetaFunction = () => {
@@ -28,6 +29,15 @@ type ApprovalRow = {
   action_description: string;
   status: string;
   expires_at: string | null;
+};
+
+type UsageRow = {
+  agent_id: string;
+  provider: string;
+  model: string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  estimated_cost: string | number | null;
 };
 
 type TaskRow = {
@@ -70,6 +80,7 @@ export default function ZapDashboard() {
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [usage, setUsage] = useState<UsageRow[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRow[]>([]);
   const [title, setTitle] = useState('');
   const [objective, setObjective] = useState('');
@@ -138,7 +149,12 @@ export default function ZapDashboard() {
     setError(null);
 
     const response = await fetch(`/api/zap/jobs/${jobId}`);
-    const body = (await response.json().catch(() => ({}))) as { job?: { tasks?: TaskRow[] }; error?: string };
+
+    const body = (await response.json().catch(() => ({}))) as {
+      job?: { tasks?: TaskRow[] };
+      usage?: { usage?: UsageRow[] } | null;
+      error?: string;
+    };
 
     if (!response.ok) {
       setError(body.error || 'Failed to load job');
@@ -146,6 +162,7 @@ export default function ZapDashboard() {
     }
 
     setTasks(Array.isArray(body.job?.tasks) ? body.job.tasks : []);
+    setUsage(Array.isArray(body.usage?.usage) ? (body.usage?.usage ?? []) : []);
   }
 
   async function createJob(event: React.FormEvent) {
@@ -401,7 +418,28 @@ export default function ZapDashboard() {
                   ))}
                 </tbody>
               </table>
+
+              {usage.length > 0 ? (
+                <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-bolt-elements-textSecondary">
+                  <span>
+                    cost ${usage.reduce((total, row) => total + Number(row.estimated_cost ?? 0), 0).toFixed(6)}
+                  </span>
+                  <span>
+                    tokens {usage.reduce((total, row) => total + Number(row.input_tokens ?? 0), 0)} in /{' '}
+                    {usage.reduce((total, row) => total + Number(row.output_tokens ?? 0), 0)} out
+                  </span>
+                  <span>
+                    {usage.length} model call{usage.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+              ) : null}
             </section>
+          )}
+
+          {selected && (
+            <div className="mt-6">
+              <RunDetail jobId={selected} />
+            </div>
           )}
         </main>
       </div>
