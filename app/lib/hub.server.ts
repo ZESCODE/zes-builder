@@ -77,6 +77,8 @@ export type ZapJobInput = {
   title: string;
   objective: string;
   workflowType?: string;
+  workflowId?: string;
+  workflowVersion?: number;
   ownerEmail?: string;
 };
 

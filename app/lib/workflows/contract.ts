@@ -266,6 +266,13 @@ export function validateDefinition(definition: WorkflowDefinition): ValidationIs
     issues.push({ path: 'nodes', message: 'Add an output node so the run has a result.' });
   }
 
+  if (definition.acceptanceCriteria.length > 0 && !definition.nodes.some((node) => node.type === 'verifier')) {
+    issues.push({
+      path: 'acceptanceCriteria',
+      message: 'Acceptance criteria need a verifier node to check them.',
+    });
+  }
+
   return issues;
 }
 
@@ -336,7 +343,12 @@ export function toHubPayload(definition: WorkflowDefinition) {
     approvals: definition.approvals,
     modelPreferences: definition.modelPreferences,
     budget: definition.budget,
-    acceptanceCriteria: definition.acceptanceCriteria,
+    acceptanceCriteria: definition.acceptanceCriteria.map((description, index) => ({
+      id: `criterion_${index + 1}`,
+      description,
+      verifierAgentId: 'verifier',
+      required: true,
+    })),
   };
 }
 

@@ -112,6 +112,27 @@ describe('workflow contract', () => {
     expect(nextNodeId('castor', [alias])).toBe('castor_2');
   });
 
+  it('maps acceptance criteria to hub objects', () => {
+    const payload = toHubPayload(workflow({ acceptanceCriteria: ['Report names the licence'] }));
+
+    expect(payload.acceptanceCriteria).toEqual([
+      {
+        id: 'criterion_1',
+        description: 'Report names the licence',
+        verifierAgentId: 'verifier',
+        required: true,
+      },
+    ]);
+  });
+
+  it('requires a verifier when acceptance criteria are set', () => {
+    const definition = workflow({ acceptanceCriteria: ['Something must hold'] });
+    definition.nodes = definition.nodes.filter((node) => node.type !== 'verifier');
+    definition.edges = [{ id: 'e1', source: 'castor_1', target: 'john_2' }, { id: 'e2', source: 'john_2', target: 'output_3' }];
+
+    expect(validateDefinition(definition).some((issue) => issue.path === 'acceptanceCriteria')).toBe(true);
+  });
+
   it('never emits a model or permission in the payload', () => {
     const payload = JSON.stringify(toHubPayload(workflow()));
     expect(payload).not.toMatch(/"model"/);
