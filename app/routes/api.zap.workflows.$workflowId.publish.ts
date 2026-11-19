@@ -1,6 +1,13 @@
 import { hubConfigured, zapPublishWorkflow } from '~/lib/hub.server';
+import { requireAccess } from '~/lib/whop.server';
 
 export async function action({ request, params }: { request: Request; params: { workflowId?: string } }) {
+  const denied = await requireAccess(request);
+
+  if (denied) {
+    return denied;
+  }
+
   if (!hubConfigured()) {
     return Response.json({ error: 'Hub is not configured (AGORA_HUB_ADMIN_KEY)' }, { status: 503 });
   }

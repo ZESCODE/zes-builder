@@ -137,7 +137,9 @@ export async function readSession(request: Request): Promise<WhopSession | null>
   return session;
 }
 
-export async function checkAccess(userId: string): Promise<{ hasAccess: boolean; level: string | null; error?: string }> {
+export async function checkAccess(
+  userId: string,
+): Promise<{ hasAccess: boolean; level: string | null; error?: string }> {
   const key = process.env.WHOP_API_KEY;
   const account = accessResourceId();
 
@@ -146,9 +148,12 @@ export async function checkAccess(userId: string): Promise<{ hasAccess: boolean;
   }
 
   try {
-    const response = await fetch(`${API_BASE}/users/${encodeURIComponent(userId)}/access/${encodeURIComponent(account)}`, {
-      headers: { Authorization: `Bearer ${key}`, 'Api-Version-Date': API_VERSION },
-    });
+    const response = await fetch(
+      `${API_BASE}/users/${encodeURIComponent(userId)}/access/${encodeURIComponent(account)}`,
+      {
+        headers: { Authorization: `Bearer ${key}`, 'Api-Version-Date': API_VERSION },
+      },
+    );
 
     if (!response.ok) {
       return { hasAccess: false, level: null, error: `access_check_${response.status}` };
@@ -235,4 +240,49 @@ export async function sessionStatus(request: Request) {
     level: access.level,
     user: { id: session.userId, username: session.username, name: session.name },
   };
+}
+
+const ACCESS_TTL_MS = 60_000;
+const accessCache = new Map<string, { at: number; result: Awaited<ReturnType<typeof checkAccess>> }>();
+
+async function cachedAccess(userId: string) {
+  const now = Date.now();
+  const cached = accessCache.get(userId);
+
+  if (cached && now - cached.at < ACCESS_TTL_MS) {
+    return cached.result;
+  }
+
+  const result = await checkAccess(userId);
+
+  accessCache.set(userId, { at: now, result });
+
+  return result;
+}
+
+/**
+ * Server-side gate for API routes. Returns null when the request may proceed,
+ * or a Response describing why it may not. A no-op when the gate is disabled.
+ */
+export async function requireAccess(request: Request): Promise<Response | null> {
+  if (!gateEnabled()) {
+    return null;
+  }
+
+  const session = await readSession(request);
+
+  if (!session) {
+    return Response.json({ error: 'sign_in_required', loginUrl: '/api/auth/whop' }, { status: 401 });
+  }
+
+  const access = await cachedAccess(session.userId);
+
+  if (!access.hasAccess) {
+    return Response.json(
+      { error: access.error || 'no_access', level: access.level, productUrl: productUrl() },
+      { status: 403 },
+    );
+  }
+
+  return null;
 }

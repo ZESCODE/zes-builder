@@ -1,6 +1,13 @@
 import { hubConfigured, zapPlanJob, zapRunNext } from '~/lib/hub.server';
+import { requireAccess } from '~/lib/whop.server';
 
 export async function action({ request, params }: { request: Request; params: { jobId?: string } }) {
+  const denied = await requireAccess(request);
+
+  if (denied) {
+    return denied;
+  }
+
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }

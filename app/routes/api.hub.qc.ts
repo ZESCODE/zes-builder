@@ -1,6 +1,13 @@
 import { hubConfigured, qcCheck } from '~/lib/hub.server';
+import { requireAccess } from '~/lib/whop.server';
 
 export async function action({ request }: { request: Request }) {
+  const denied = await requireAccess(request);
+
+  if (denied) {
+    return denied;
+  }
+
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
