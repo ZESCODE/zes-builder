@@ -1,6 +1,13 @@
 import { hubConfigured, zapCreateWorkflow, zapListWorkflows } from '~/lib/hub.server';
+import { requireAccess } from '~/lib/whop.server';
 
-export async function loader() {
+export async function loader({ request }: { request: Request }) {
+  const denied = await requireAccess(request);
+
+  if (denied) {
+    return denied;
+  }
+
   if (!hubConfigured()) {
     return Response.json({ error: 'Hub is not configured (AGORA_HUB_ADMIN_KEY)' }, { status: 503 });
   }
@@ -17,6 +24,12 @@ export async function loader() {
 }
 
 export async function action({ request }: { request: Request }) {
+  const denied = await requireAccess(request);
+
+  if (denied) {
+    return denied;
+  }
+
   if (!hubConfigured()) {
     return Response.json({ error: 'Hub is not configured (AGORA_HUB_ADMIN_KEY)' }, { status: 503 });
   }

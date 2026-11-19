@@ -1,6 +1,13 @@
 import { hubConfigured, zapGetJob, zapJobUsage } from '~/lib/hub.server';
+import { requireAccess } from '~/lib/whop.server';
 
-export async function loader({ params }: { params: { jobId?: string } }) {
+export async function loader({ request, params }: { request: Request; params: { jobId?: string } }) {
+  const denied = await requireAccess(request);
+
+  if (denied) {
+    return denied;
+  }
+
   if (!hubConfigured()) {
     return Response.json({ error: 'Hub is not configured (AGORA_HUB_ADMIN_KEY)' }, { status: 503 });
   }
