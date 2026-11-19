@@ -3,6 +3,7 @@ import type { MetaFunction } from 'react-router';
 import { Header } from '~/components/header/Header';
 import BackgroundRays from '~/components/ui/BackgroundRays';
 import { AccessGate } from '~/components/whop/AccessGate';
+import { WorkflowLibrary } from '~/components/zap/WorkflowLibrary';
 
 export const meta: MetaFunction = () => {
   return [
@@ -218,6 +219,14 @@ export default function ZapDashboard() {
             >
               Workflow canvas →
             </a>
+          </div>
+
+          <div className="mb-6">
+            <WorkflowLibrary
+              onJobStarted={(jobId) => {
+                void loadJobs().then(() => openJob(jobId));
+              }}
+            />
           </div>
 
           <div className="grid gap-6 md:grid-cols-2">
