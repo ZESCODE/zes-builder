@@ -81,6 +81,7 @@ export default function ZapDashboard() {
   const [selected, setSelected] = useState<string | null>(null);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [usage, setUsage] = useState<UsageRow[]>([]);
+  const [jobStatus, setJobStatus] = useState<string>('');
   const [approvals, setApprovals] = useState<ApprovalRow[]>([]);
   const [title, setTitle] = useState('');
   const [objective, setObjective] = useState('');
@@ -151,7 +152,7 @@ export default function ZapDashboard() {
     const response = await fetch(`/api/zap/jobs/${jobId}`);
 
     const body = (await response.json().catch(() => ({}))) as {
-      job?: { tasks?: TaskRow[] };
+      job?: { tasks?: TaskRow[]; status?: string };
       usage?: { usage?: UsageRow[] } | null;
       error?: string;
     };
@@ -163,6 +164,7 @@ export default function ZapDashboard() {
 
     setTasks(Array.isArray(body.job?.tasks) ? body.job.tasks : []);
     setUsage(Array.isArray(body.usage?.usage) ? (body.usage?.usage ?? []) : []);
+    setJobStatus(body.job?.status ?? '');
   }
 
   async function createJob(event: React.FormEvent) {
@@ -188,6 +190,37 @@ export default function ZapDashboard() {
     setTitle('');
     setObjective('');
     await loadJobs();
+  }
+
+  async function control(action: 'cancel' | 'resume' | 'pause') {
+    if (!selected) {
+      return;
+    }
+
+    if (action === 'cancel' && !window.confirm('Cancel this run? In-flight tasks stop.')) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+
+    const response = await fetch(`/api/zap/jobs/${selected}/control`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    });
+
+    const body = (await response.json().catch(() => ({}))) as { error?: string; status?: string };
+
+    setBusy(false);
+
+    if (!response.ok) {
+      setError(body.error || `Failed to ${action} the job`);
+      return;
+    }
+
+    await loadJobs();
+    await openJob(selected);
   }
 
   async function orchestrate(action: 'plan' | 'run') {
@@ -364,8 +397,40 @@ export default function ZapDashboard() {
           {selected && (
             <section className="mt-6 rounded-lg border border-bolt-elements-borderColor p-4 bg-bolt-elements-background-depth-1/60">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-bolt-elements-textSecondary">Plan</h2>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-bolt-elements-textSecondary">
+                  Plan {jobStatus ? <span className={statusTone(jobStatus)}>· {jobStatus}</span> : null}
+                </h2>
                 <div className="flex gap-2">
+                  {jobStatus === 'paused' ? (
+                    <button
+                      type="button"
+                      onClick={() => control('resume')}
+                      disabled={busy}
+                      className="rounded-md border border-emerald-500/50 px-3 py-1.5 text-sm text-emerald-300 disabled:opacity-40"
+                    >
+                      Resume
+                    </button>
+                  ) : null}
+                  {jobStatus && !['completed', 'cancelled', 'failed', 'paused'].includes(jobStatus) ? (
+                    <button
+                      type="button"
+                      onClick={() => control('pause')}
+                      disabled={busy}
+                      className="rounded-md border border-amber-500/50 px-3 py-1.5 text-sm text-amber-300 disabled:opacity-40"
+                    >
+                      Pause
+                    </button>
+                  ) : null}
+                  {jobStatus && !['completed', 'cancelled'].includes(jobStatus) ? (
+                    <button
+                      type="button"
+                      onClick={() => control('cancel')}
+                      disabled={busy}
+                      className="rounded-md border border-red-500/50 px-3 py-1.5 text-sm text-red-300 disabled:opacity-40"
+                    >
+                      Cancel
+                    </button>
+                  ) : null}
                   <a
                     href={`/zap/canvas?job=${selected}`}
                     className="rounded-md border border-bolt-elements-borderColor px-3 py-1.5 text-sm hover:border-blue-400/60"

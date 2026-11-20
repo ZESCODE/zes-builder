@@ -44,6 +44,7 @@ export default [
   { file: 'routes/api.zap.jobs.create.ts', path: '/api/zap/jobs/create' },
   { file: 'routes/api.zap.jobs.$jobId.ts', path: '/api/zap/jobs/:jobId' },
   { file: 'routes/api.zap.jobs.$jobId.run.ts', path: '/api/zap/jobs/:jobId/run' },
+  { file: 'routes/api.zap.jobs.$jobId.control.ts', path: '/api/zap/jobs/:jobId/control' },
   { file: 'routes/api.zap.jobs.$jobId.graph.ts', path: '/api/zap/jobs/:jobId/graph' },
   { file: 'routes/api.zap.jobs.$jobId.tasks.ts', path: '/api/zap/jobs/:jobId/tasks' },
   { file: 'routes/api.zap.jobs.$jobId.artifacts.ts', path: '/api/zap/jobs/:jobId/artifacts' },
