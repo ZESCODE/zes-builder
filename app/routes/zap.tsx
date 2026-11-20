@@ -4,6 +4,7 @@ import { Header } from '~/components/header/Header';
 import BackgroundRays from '~/components/ui/BackgroundRays';
 import { AccessGate } from '~/components/whop/AccessGate';
 import { RunDetail } from '~/components/zap/RunDetail';
+import { ScoutLauncher } from '~/components/zap/ScoutLauncher';
 import { WorkflowLibrary } from '~/components/zap/WorkflowLibrary';
 
 export const meta: MetaFunction = () => {
@@ -271,7 +272,12 @@ export default function ZapDashboard() {
             </a>
           </div>
 
-          <div className="mb-6">
+          <div className="mb-6 flex flex-col gap-4">
+            <ScoutLauncher
+              onStarted={(jobId) => {
+                void loadJobs().then(() => openJob(jobId));
+              }}
+            />
             <WorkflowLibrary
               onJobStarted={(jobId) => {
                 void loadJobs().then(() => openJob(jobId));
