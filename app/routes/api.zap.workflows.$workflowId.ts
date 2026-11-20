@@ -1,4 +1,4 @@
-import { hubConfigured, zapGetWorkflow, zapUpdateWorkflow } from '~/lib/hub.server';
+import { hubConfigured, zapDeleteWorkflow, zapGetWorkflow, zapUpdateWorkflow } from '~/lib/hub.server';
 import { requireAccess } from '~/lib/whop.server';
 
 export async function loader({ request, params }: { request: Request; params: { workflowId?: string } }) {
@@ -40,6 +40,18 @@ export async function action({ request, params }: { request: Request; params: { 
 
   if (!params.workflowId) {
     return Response.json({ error: 'workflowId is required' }, { status: 400 });
+  }
+
+  if (request.method === 'DELETE') {
+    try {
+      const result = await zapDeleteWorkflow(params.workflowId);
+      return Response.json(result.data, { status: result.status });
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : 'Failed to delete workflow' },
+        { status: 502 },
+      );
+    }
   }
 
   if (request.method !== 'PUT') {

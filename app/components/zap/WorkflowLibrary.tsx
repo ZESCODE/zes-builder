@@ -75,6 +75,30 @@ export function WorkflowLibrary({ onJobStarted }: { onJobStarted?: (jobId: strin
     }
   }
 
+  async function remove(workflow: WorkflowRow) {
+    if (!window.confirm(`Delete "${workflow.name}" and all of its versions?`)) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+
+    const response = await fetch(`/api/zap/workflows/${encodeURIComponent(workflow.workflowId)}`, {
+      method: 'DELETE',
+    });
+
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+
+    setBusy(false);
+
+    if (!response.ok) {
+      setError(body.error || 'Failed to delete the workflow');
+      return;
+    }
+
+    await load();
+  }
+
   async function startRun(workflow: WorkflowRow) {
     const text = (objective[workflow.workflowId] ?? workflow.description ?? workflow.name).trim();
 
@@ -181,6 +205,14 @@ export function WorkflowLibrary({ onJobStarted }: { onJobStarted?: (jobId: strin
                     className="rounded-md border border-bolt-elements-borderColor px-3 py-1.5 text-sm"
                   >
                     Versions
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void remove(workflow)}
+                    disabled={busy}
+                    className="rounded-md border border-red-500/50 px-3 py-1.5 text-sm text-red-300 disabled:opacity-40"
+                  >
+                    Delete
                   </button>
                 </div>
               </div>

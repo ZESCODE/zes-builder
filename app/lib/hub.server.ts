@@ -155,6 +155,20 @@ export async function zapUpdateWorkflow(workflowId: string, definition: unknown)
   return { status: response.status, data };
 }
 
+export async function zapDeleteWorkflow(workflowId: string) {
+  const response = await fetch(`${hubUrl()}/api/v1/workflows/${encodeURIComponent(workflowId)}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${hubKey()}`,
+    },
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  const data = await response.json().catch(() => ({ error: `Hub returned ${response.status}` }));
+
+  return { status: response.status, data };
+}
+
 export async function zapPublishWorkflow(workflowId: string, version?: number) {
   return hubFetch(`/api/v1/workflows/${encodeURIComponent(workflowId)}/publish`, version ? { version } : {});
 }
