@@ -125,8 +125,9 @@ export function createScoutDefinition(ref: RepoRef): WorkflowDefinition {
       stopOnFailure: true,
     },
     acceptanceCriteria: [
-      `The repository ${ref.owner}/${ref.repo} was read through the GitHub tool and the findings cite concrete files.`,
-      'The verifier independently checked the findings and recorded a verification report.',
+      `The report describes what ${ref.owner}/${ref.repo} is for and names the top level files the GitHub tool returned.`,
+      'The report lists concrete findings about the repository, each tied to the tool output.',
+      'The verifier checked the findings independently and recorded a verification report.',
     ],
   };
 }
