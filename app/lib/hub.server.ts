@@ -167,6 +167,10 @@ export async function zapJobGraph(jobId: string) {
   return hubGet(`/api/v1/jobs/${encodeURIComponent(jobId)}/graph`);
 }
 
+export async function zapCancelJob(jobId: string) {
+  return hubFetch(`/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, {});
+}
+
 export async function zapPauseJob(jobId: string, reason?: string) {
   return hubFetch(`/api/v1/jobs/${encodeURIComponent(jobId)}/pause`, reason ? { reason } : {});
 }
