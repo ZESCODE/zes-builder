@@ -261,6 +261,21 @@ async function cachedAccess(userId: string) {
 }
 
 /**
+ * The principal of the caller, relayed to the hub so a workflow definition and
+ * its runs stay scoped to the user who created them. It is null when the gate
+ * is off or when there is no session, which the hub treats as an internal call.
+ */
+export async function callerPrincipal(request: Request): Promise<string | null> {
+  const session = await readSession(request);
+
+  if (!session) {
+    return null;
+  }
+
+  return `whop:${session.userId}`.toLowerCase();
+}
+
+/**
  * Server-side gate for API routes. Returns null when the request may proceed,
  * or a Response describing why it may not. A no-op when the gate is disabled.
  */

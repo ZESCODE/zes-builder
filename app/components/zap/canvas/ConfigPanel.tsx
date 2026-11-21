@@ -168,22 +168,56 @@ export function ConfigPanel({
             </>
           ) : null}
 
-          {node.data.nodeType === 'output' ? (
-            <Field label="Artifact types (comma separated)">
-              <input
-                className={inputClass}
-                value={(config.artifactTypes as string[] | undefined)?.join(', ') ?? ''}
-                onChange={(event) =>
-                  onConfig({
-                    ...config,
-                    artifactTypes: event.target.value
-                      .split(',')
-                      .map((value) => value.trim())
-                      .filter(Boolean),
-                  } as NodeConfig)
-                }
-              />
-            </Field>
+          {node.data.nodeType === 'start' ? (
+            <>
+              <Field label="Trigger">
+                <select
+                  className={inputClass}
+                  value={String(config.trigger ?? 'manual')}
+                  onChange={(event) => onConfig({ ...config, trigger: event.target.value } as NodeConfig)}
+                >
+                  <option value="manual">manual</option>
+                  <option value="api">api</option>
+                </select>
+              </Field>
+              <Field label="Objective">
+                <textarea
+                  className={`${inputClass} min-h-16 resize-y`}
+                  value={String(config.objective ?? '')}
+                  onChange={(event) => onConfig({ ...config, objective: event.target.value } as NodeConfig)}
+                />
+              </Field>
+              <p className="rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-2 py-1.5 text-[11px] text-bolt-elements-textTertiary">
+                The start node marks the entry of the workflow. Its objective overrides the objective of the run.
+              </p>
+            </>
+          ) : null}
+
+          {node.data.nodeType === 'output' || node.data.nodeType === 'report' ? (
+            <>
+              <Field label="Artifact types (comma separated)">
+                <input
+                  className={inputClass}
+                  value={(config.artifactTypes as string[] | undefined)?.join(', ') ?? ''}
+                  onChange={(event) =>
+                    onConfig({
+                      ...config,
+                      artifactTypes: event.target.value
+                        .split(',')
+                        .map((value) => value.trim())
+                        .filter(Boolean),
+                    } as NodeConfig)
+                  }
+                />
+              </Field>
+              <Field label="Report name">
+                <input
+                  className={inputClass}
+                  value={String(config.reportName ?? '')}
+                  onChange={(event) => onConfig({ ...config, reportName: event.target.value } as NodeConfig)}
+                />
+              </Field>
+            </>
           ) : null}
         </>
       ) : (

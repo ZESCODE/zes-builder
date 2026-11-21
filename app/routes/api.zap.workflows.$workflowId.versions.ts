@@ -1,5 +1,5 @@
 import { hubConfigured, zapWorkflowVersions } from '~/lib/hub.server';
-import { requireAccess } from '~/lib/whop.server';
+import { callerPrincipal, requireAccess } from '~/lib/whop.server';
 
 export async function loader({ request, params }: { request: Request; params: { workflowId?: string } }) {
   const denied = await requireAccess(request);
@@ -17,7 +17,7 @@ export async function loader({ request, params }: { request: Request; params: { 
   }
 
   try {
-    const result = await zapWorkflowVersions(params.workflowId);
+    const result = await zapWorkflowVersions(params.workflowId, await callerPrincipal(request));
     return Response.json(result.data, { status: result.status });
   } catch (error) {
     return Response.json(

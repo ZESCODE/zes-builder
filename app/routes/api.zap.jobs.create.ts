@@ -1,5 +1,5 @@
 import { hubConfigured, zapCreateJob } from '~/lib/hub.server';
-import { requireAccess } from '~/lib/whop.server';
+import { callerPrincipal, requireAccess } from '~/lib/whop.server';
 
 export async function action({ request }: { request: Request }) {
   const denied = await requireAccess(request);
@@ -29,13 +29,16 @@ export async function action({ request }: { request: Request }) {
   }
 
   try {
-    const result = await zapCreateJob({
-      title: body.title,
-      objective: body.objective,
-      workflowType: body.workflowType,
-      workflowId: body.workflowId,
-      workflowVersion: body.workflowVersion,
-    });
+    const result = await zapCreateJob(
+      {
+        title: body.title,
+        objective: body.objective,
+        workflowType: body.workflowType,
+        workflowId: body.workflowId,
+        workflowVersion: body.workflowVersion,
+      },
+      await callerPrincipal(request),
+    );
 
     return Response.json(result.data, { status: result.status });
   } catch (error) {

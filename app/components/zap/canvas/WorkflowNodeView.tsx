@@ -7,6 +7,7 @@ const CATEGORY_TONE: Record<string, string> = {
   agent: 'border-bolt-elements-borderColor bg-bolt-elements-background-depth-3',
   control: 'border-amber-500/40 bg-amber-500/10',
   tool: 'border-indigo-500/40 bg-indigo-500/10',
+  sink: 'border-emerald-500/40 bg-emerald-500/10',
   output: 'border-emerald-500/40 bg-emerald-500/10',
 };
 

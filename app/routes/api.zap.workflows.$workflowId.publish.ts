@@ -1,5 +1,5 @@
 import { hubConfigured, zapPublishWorkflow } from '~/lib/hub.server';
-import { requireAccess } from '~/lib/whop.server';
+import { callerPrincipal, requireAccess } from '~/lib/whop.server';
 
 export async function action({ request, params }: { request: Request; params: { workflowId?: string } }) {
   const denied = await requireAccess(request);
@@ -23,7 +23,7 @@ export async function action({ request, params }: { request: Request; params: { 
   const body = (await request.json().catch(() => ({}))) as { version?: number };
 
   try {
-    const result = await zapPublishWorkflow(params.workflowId, body.version);
+    const result = await zapPublishWorkflow(params.workflowId, body.version, await callerPrincipal(request));
     return Response.json(result.data, { status: result.status });
   } catch (error) {
     return Response.json(
