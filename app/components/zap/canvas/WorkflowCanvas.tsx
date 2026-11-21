@@ -14,12 +14,16 @@ import { toast } from 'react-toastify';
 
 import { ConfigPanel } from './ConfigPanel';
 import { NodePalette } from './NodePalette';
+import { ValidationPreview } from './ValidationPreview';
 import { WorkflowNodeView } from './WorkflowNodeView';
 import { useCanvasStore, type FlowNode } from './store';
 import { toHubPayload } from '~/lib/workflows/contract';
 import type { NodeTypeDescriptor, WorkflowDefinition } from '~/lib/workflows/contract';
+import { parseRunState } from '~/lib/workflows/run-state';
 
 const nodeTypes = { workflowNode: WorkflowNodeView };
+
+const TERMINAL_JOB_STATUSES = ['completed', 'failed', 'cancelled'];
 
 type JsonRecord = Record<string, unknown>;
 
@@ -38,6 +42,7 @@ export function WorkflowCanvas({ descriptors, workflowId, jobId }: Props) {
   const { screenToFlowPosition } = useReactFlow();
   const loaded = useRef(false);
   const [creatingJob, setCreatingJob] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     store.loadDescriptorSet(descriptors);
@@ -60,8 +65,17 @@ export function WorkflowCanvas({ descriptors, workflowId, jobId }: Props) {
     fetch(`/api/zap/workflows/${encodeURIComponent(workflowId)}`)
       .then((response) => (response.ok ? response.json() : Promise.reject(new Error('Workflow not found'))))
       .then((raw) => {
-        const data = asRecord(raw) as { workflow?: { definition?: unknown }; definition?: unknown };
-        const definition = (asRecord(data.workflow).definition ?? data.definition ?? data) as WorkflowDefinition;
+        const data = asRecord(raw);
+        const record = asRecord(data.workflow);
+        const body = asRecord(record.definition ?? data.definition ?? data);
+
+        const definition = {
+          ...body,
+          workflowId: String(record.workflowId ?? record.workflow_id ?? body.workflowId ?? workflowId),
+          version: Number(record.version ?? body.version ?? 1),
+          status: String(record.status ?? body.status ?? 'draft'),
+          name: String(body.name ?? record.name ?? ''),
+        } as unknown as WorkflowDefinition;
 
         if (definition && Array.isArray(definition.nodes)) {
           useCanvasStore.setState({ workflowId });
@@ -73,27 +87,46 @@ export function WorkflowCanvas({ descriptors, workflowId, jobId }: Props) {
       .catch((error: Error) => toast.error(error.message));
   }, [workflowId]);
 
+  const runJob = store.runJobId ?? jobId ?? null;
+
   useEffect(() => {
-    if (!jobId) {
-      return;
+    if (!runJob) {
+      return undefined;
     }
 
-    fetch(`/api/zap/jobs/${encodeURIComponent(jobId)}/graph`)
-      .then((response) => (response.ok ? response.json() : Promise.reject(new Error('Run not found'))))
-      .then((raw) => {
-        const data = asRecord(raw) as { tasks?: Array<{ nodeId?: string; status?: string }> };
-        const status: Record<string, string> = {};
+    let stopped = false;
 
-        for (const task of data.tasks ?? []) {
-          if (task.nodeId && task.status) {
-            status[task.nodeId] = task.status;
-          }
+    const refresh = async () => {
+      try {
+        const [jobResponse, tasksResponse] = await Promise.all([
+          fetch(`/api/zap/jobs/${encodeURIComponent(runJob)}`),
+          fetch(`/api/zap/jobs/${encodeURIComponent(runJob)}/tasks`),
+        ]);
+
+        if (stopped || !jobResponse.ok || !tasksResponse.ok) {
+          return;
         }
 
-        useCanvasStore.getState().setRunStatus(jobId, status);
-      })
-      .catch((error: Error) => toast.error(error.message));
-  }, [jobId]);
+        const jobBody = asRecord(await jobResponse.json());
+        const tasksBody = asRecord(await tasksResponse.json());
+        const state = parseRunState(jobBody, tasksBody);
+
+        useCanvasStore.getState().setRunJob(runJob, state.jobStatus, state.workflowVersion);
+        useCanvasStore.getState().setRunStatus(runJob, state.nodeStatus);
+      } catch {
+        // the run view keeps the last persisted state
+      }
+    };
+
+    void refresh();
+
+    const timer = setInterval(refresh, 3000);
+
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [runJob]);
 
   const onConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target) {
@@ -210,6 +243,11 @@ export function WorkflowCanvas({ descriptors, workflowId, jobId }: Props) {
       return;
     }
 
+    if (state.status !== 'published') {
+      toast.error('Publish the workflow before running it.');
+      return;
+    }
+
     setCreatingJob(true);
 
     try {
@@ -220,6 +258,7 @@ export function WorkflowCanvas({ descriptors, workflowId, jobId }: Props) {
           title: state.name,
           objective: state.acceptanceCriteria.join('\n') || state.name,
           workflowId: definition.workflowId,
+          workflowVersion: state.version,
         }),
       });
 
@@ -229,8 +268,12 @@ export function WorkflowCanvas({ descriptors, workflowId, jobId }: Props) {
         throw new Error(String(data.error || 'Could not start the run.'));
       }
 
-      toast.success('Run created — the hub is planning it.');
-      window.location.href = `/zap?job=${encodeURIComponent(String(data.jobId ?? ''))}`;
+      const startedJobId = String(data.jobId ?? '');
+      const attached = asRecord(data.workflow) as { version?: number };
+
+      useCanvasStore.getState().setRunJob(startedJobId, 'requested', attached.version ?? state.version);
+      useCanvasStore.getState().setRunStatus(startedJobId, {});
+      toast.success('Run started — the hub owns the execution.');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not start the run.');
     } finally {
@@ -270,7 +313,10 @@ export function WorkflowCanvas({ descriptors, workflowId, jobId }: Props) {
           </button>
           <button
             type="button"
-            onClick={() => save(true)}
+            onClick={() => {
+              useCanvasStore.getState().validate();
+              setPreviewOpen(true);
+            }}
             disabled={store.busy}
             className="rounded-lg bg-accent-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-50"
           >
@@ -287,6 +333,25 @@ export function WorkflowCanvas({ descriptors, workflowId, jobId }: Props) {
           </button>
         </div>
       </header>
+
+      {store.runJobId ? (
+        <div className="flex flex-wrap items-center gap-3 border-b border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 px-3 py-1.5 text-[11px] text-bolt-elements-textSecondary">
+          <span className="font-mono text-bolt-elements-textTertiary">job {store.runJobId.slice(0, 8)}</span>
+          <span>
+            status:{' '}
+            <span className="font-medium text-bolt-elements-textPrimary">{store.runJobStatus ?? 'unknown'}</span>
+          </span>
+          {store.runJobVersion ? <span>workflow version: {store.runJobVersion}</span> : null}
+          {store.runJobStatus && TERMINAL_JOB_STATUSES.includes(store.runJobStatus) ? (
+            <a
+              href={`/zap?job=${encodeURIComponent(store.runJobId)}`}
+              className="text-accent-400 underline-offset-2 hover:underline"
+            >
+              Open the run report
+            </a>
+          ) : null}
+        </div>
+      ) : null}
 
       {store.issues.length > 0 ? (
         <ul className="flex flex-wrap gap-x-4 gap-y-1 border-b border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[11px] text-red-300">
@@ -341,6 +406,20 @@ export function WorkflowCanvas({ descriptors, workflowId, jobId }: Props) {
         <span>{store.edges.length} edges</span>
         {store.error ? <span className="text-red-400">{store.error}</span> : null}
       </footer>
+
+      {previewOpen ? (
+        <ValidationPreview
+          issues={store.issues}
+          version={store.version}
+          status={store.status}
+          busy={store.busy}
+          onCancel={() => setPreviewOpen(false)}
+          onPublish={() => {
+            setPreviewOpen(false);
+            void save(true);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

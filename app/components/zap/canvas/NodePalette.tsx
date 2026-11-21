@@ -1,12 +1,33 @@
 import type { NodeTypeDescriptor } from '~/lib/workflows/contract';
 
-const GROUP_ORDER = ['agent', 'control', 'tool', 'output'];
+const GROUP_ORDER = ['control', 'agent', 'tool', 'sink', 'output'];
 
 export function NodePalette({ descriptors }: { descriptors: NodeTypeDescriptor[] }) {
-  const groups = GROUP_ORDER.map((category) => ({
-    category,
-    items: descriptors.filter((descriptor) => descriptor.category === category),
-  })).filter((group) => group.items.length > 0);
+  const categories = [...new Set(descriptors.map((descriptor) => descriptor.category))].sort((a, b) => {
+    const left = GROUP_ORDER.indexOf(a);
+    const right = GROUP_ORDER.indexOf(b);
+
+    if (left === right) {
+      return a.localeCompare(b);
+    }
+
+    if (left === -1) {
+      return 1;
+    }
+
+    if (right === -1) {
+      return -1;
+    }
+
+    return left - right;
+  });
+
+  const groups = categories
+    .map((category) => ({
+      category,
+      items: descriptors.filter((descriptor) => descriptor.category === category),
+    }))
+    .filter((group) => group.items.length > 0);
 
   return (
     <aside className="flex w-56 shrink-0 flex-col gap-4 overflow-y-auto border-r border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-3">

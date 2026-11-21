@@ -17,6 +17,7 @@ import {
   createDefinition,
   defaultConfigFor,
   nextNodeId,
+  toCriterionLines,
   type NodeConfig,
   type NodeType,
   type NodeTypeDescriptor,
@@ -52,6 +53,8 @@ type CanvasState = {
   selectedNodeId: string | null;
   runStatus: Record<string, string>;
   runJobId: string | null;
+  runJobStatus: string | null;
+  runJobVersion: number | null;
   issues: ValidationIssue[];
   notice: string | null;
   error: string | null;
@@ -68,6 +71,7 @@ type CanvasState = {
   connect: (connection: { source?: string | null; target?: string | null; sourceHandle?: string | null }) => void;
   select: (nodeId: string | null) => void;
   setRunStatus: (jobId: string | null, status: Record<string, string>) => void;
+  setRunJob: (jobId: string | null, status: string | null, version: number | null) => void;
   setName: (name: string) => void;
   setExecution: (execution: Partial<WorkflowDefinition['execution']>) => void;
   setBudget: (budget: Partial<WorkflowDefinition['budget']>) => void;
@@ -129,6 +133,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   selectedNodeId: null,
   runStatus: {},
   runJobId: null,
+  runJobStatus: null,
+  runJobVersion: null,
   issues: [],
   notice: null,
   error: null,
@@ -149,7 +155,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       status: definition.status,
       execution: definition.execution,
       budget: definition.budget,
-      acceptanceCriteria: definition.acceptanceCriteria,
+      acceptanceCriteria: toCriterionLines(definition.acceptanceCriteria),
       nodes: definition.nodes.map((node) => toFlowNode(node, descriptors[node.type])),
       edges: definition.edges.map((edge) => ({
         id: edge.id,
@@ -255,6 +261,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   select: (nodeId) => set({ selectedNodeId: nodeId }),
 
   setRunStatus: (jobId, status) => set({ runJobId: jobId, runStatus: status }),
+
+  setRunJob: (jobId, status, version) => set({ runJobId: jobId, runJobStatus: status, runJobVersion: version }),
 
   setName: (name) => set({ name }),
 

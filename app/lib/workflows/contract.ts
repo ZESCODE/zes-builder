@@ -7,6 +7,7 @@
 export const CONTRACT_VERSION = 'zes.workflow/v1';
 
 export type NodeType =
+  | 'start'
   | 'castor'
   | 'john'
   | 'siti'
@@ -19,7 +20,26 @@ export type NodeType =
   | 'research_tool'
   | 'builder_tool'
   | 'deployment_tool'
-  | 'output';
+  | 'output'
+  | 'report';
+
+export const NODE_TYPES: NodeType[] = [
+  'start',
+  'castor',
+  'john',
+  'siti',
+  'laurent',
+  'labu',
+  'verifier',
+  'approval_gate',
+  'condition',
+  'github_tool',
+  'research_tool',
+  'builder_tool',
+  'deployment_tool',
+  'output',
+  'report',
+];
 
 export type RoutingPolicy = {
   taskType: string;
@@ -62,7 +82,13 @@ export type OutputNodeConfig = {
   reportName?: string;
 };
 
-export type NodeConfig = AgentNodeConfig | ApprovalNodeConfig | ConditionNodeConfig | ToolNodeConfig | OutputNodeConfig;
+export type StartNodeConfig = {
+  trigger: 'manual' | 'api';
+  objective?: string;
+};
+
+export type NodeConfig =
+  AgentNodeConfig | ApprovalNodeConfig | ConditionNodeConfig | ToolNodeConfig | OutputNodeConfig | StartNodeConfig;
 
 export type WorkflowNode = {
   id: string;
@@ -159,6 +185,10 @@ export function createDefinition(input: { workflowId: string; name: string }): W
 }
 
 export function defaultConfigFor(type: NodeType, descriptor?: NodeTypeDescriptor): NodeConfig {
+  if (type === 'start') {
+    return { trigger: 'manual' } satisfies StartNodeConfig;
+  }
+
   if (type === 'approval_gate') {
     return { actionType: 'deployment', required: true } satisfies ApprovalNodeConfig;
   }
@@ -171,7 +201,7 @@ export function defaultConfigFor(type: NodeType, descriptor?: NodeTypeDescriptor
     } satisfies ConditionNodeConfig;
   }
 
-  if (type === 'output') {
+  if (type === 'output' || type === 'report') {
     return { artifactTypes: [] } satisfies OutputNodeConfig;
   }
 
@@ -191,6 +221,22 @@ export function defaultConfigFor(type: NodeType, descriptor?: NodeTypeDescriptor
 }
 
 export type ValidationIssue = { path: string; message: string };
+
+/**
+ * The hub stores acceptance criteria as objects, the canvas edits them as
+ * lines of text. This is the only place the two shapes meet.
+ */
+export function toCriterionLines(criteria: unknown): string[] {
+  if (!Array.isArray(criteria)) {
+    return [];
+  }
+
+  return criteria
+    .map((criterion) =>
+      typeof criterion === 'string' ? criterion : String((criterion as { description?: string }).description ?? ''),
+    )
+    .filter(Boolean);
+}
 
 export function validateDefinition(definition: WorkflowDefinition): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
@@ -218,6 +264,13 @@ export function validateDefinition(definition: WorkflowDefinition): ValidationIs
     }
 
     ids.add(node.id);
+
+    if (!NODE_TYPES.includes(node.type)) {
+      issues.push({
+        path: `nodes[${index}].type`,
+        message: `Unsupported node type "${node.type}".`,
+      });
+    }
 
     const config = node.config as Record<string, unknown>;
 
@@ -295,7 +348,23 @@ export function validateDefinition(definition: WorkflowDefinition): ValidationIs
   }
 
   if (!hasTerminalNode(definition)) {
-    issues.push({ path: 'nodes', message: 'Add an output node so the run has a result.' });
+    issues.push({ path: 'nodes', message: 'Add an output or report node so the run has a result.' });
+  }
+
+  if (!definition.nodes.some((node) => node.type === 'castor')) {
+    issues.push({ path: 'nodes', message: 'Add a castor node to orchestrate the workflow.' });
+  }
+
+  const startNodes = definition.nodes.filter((node) => node.type === 'start');
+
+  if (startNodes.length > 1) {
+    issues.push({ path: 'nodes', message: 'A workflow can have only one start node.' });
+  }
+
+  for (const edge of definition.edges) {
+    if (ids.has(edge.target) && definition.nodes.find((node) => node.id === edge.target)?.type === 'start') {
+      issues.push({ path: `edges.${edge.id}`, message: 'The start node cannot have incoming edges.' });
+    }
   }
 
   if (definition.acceptanceCriteria.length > 0 && !definition.nodes.some((node) => node.type === 'verifier')) {
@@ -349,7 +418,7 @@ function hasCycle(nodeIds: string[], edges: WorkflowEdge[]): boolean {
 }
 
 function hasTerminalNode(definition: WorkflowDefinition): boolean {
-  return definition.nodes.some((node) => node.type === 'output');
+  return definition.nodes.some((node) => node.type === 'output' || node.type === 'report');
 }
 
 export function toHubPayload(definition: WorkflowDefinition) {

@@ -81,7 +81,7 @@ describe('workflow contract', () => {
       edges: [{ id: 'e1', source: 'castor_1', target: 'john_2' }],
     });
 
-    expect(validateDefinition(definition).some((issue) => /output node/.test(issue.message))).toBe(true);
+    expect(validateDefinition(definition).some((issue) => /output or report node/.test(issue.message))).toBe(true);
   });
 
   it('serialises to the hub payload with rounded positions', () => {
@@ -176,5 +176,70 @@ describe('workflow contract', () => {
     const payload = JSON.stringify(toHubPayload(workflow()));
     expect(payload).not.toMatch(/"model"/);
     expect(payload).not.toMatch(/"permissions"/);
+  });
+
+  it('accepts a report node instead of an output node', () => {
+    const definition = workflow({
+      nodes: [
+        { id: 'castor_1', type: 'castor', position: { x: 0, y: 0 }, config: defaultConfigFor('castor') },
+        { id: 'report_2', type: 'report', position: { x: 200, y: 0 }, config: defaultConfigFor('report') },
+      ],
+      edges: [{ id: 'e1', source: 'castor_1', target: 'report_2' }],
+    });
+
+    expect(validateDefinition(definition)).toEqual([]);
+  });
+
+  it('accepts a single start node', () => {
+    const definition = workflow({
+      nodes: [
+        { id: 'start_1', type: 'start', position: { x: 0, y: 0 }, config: defaultConfigFor('start') },
+        { id: 'castor_2', type: 'castor', position: { x: 200, y: 0 }, config: defaultConfigFor('castor') },
+        { id: 'output_3', type: 'output', position: { x: 400, y: 0 }, config: defaultConfigFor('output') },
+      ],
+      edges: [
+        { id: 'e1', source: 'start_1', target: 'castor_2' },
+        { id: 'e2', source: 'castor_2', target: 'output_3' },
+      ],
+    });
+
+    expect(validateDefinition(definition)).toEqual([]);
+    expect(defaultConfigFor('start')).toEqual({ trigger: 'manual' });
+  });
+
+  it('rejects a second start node', () => {
+    const definition = workflow({
+      nodes: [
+        { id: 'start_1', type: 'start', position: { x: 0, y: 0 }, config: defaultConfigFor('start') },
+        { id: 'start_2', type: 'start', position: { x: 100, y: 0 }, config: defaultConfigFor('start') },
+        { id: 'castor_3', type: 'castor', position: { x: 200, y: 0 }, config: defaultConfigFor('castor') },
+        { id: 'output_4', type: 'output', position: { x: 400, y: 0 }, config: defaultConfigFor('output') },
+      ],
+      edges: [
+        { id: 'e1', source: 'start_1', target: 'castor_3' },
+        { id: 'e2', source: 'castor_3', target: 'output_4' },
+      ],
+    });
+
+    expect(validateDefinition(definition).some((issue) => /only one start node/.test(issue.message))).toBe(true);
+  });
+
+  it('rejects an incoming edge to a start node', () => {
+    const definition = workflow({
+      nodes: [
+        { id: 'start_1', type: 'start', position: { x: 0, y: 0 }, config: defaultConfigFor('start') },
+        { id: 'castor_2', type: 'castor', position: { x: 200, y: 0 }, config: defaultConfigFor('castor') },
+        { id: 'output_3', type: 'output', position: { x: 400, y: 0 }, config: defaultConfigFor('output') },
+      ],
+      edges: [
+        { id: 'e1', source: 'start_1', target: 'castor_2' },
+        { id: 'e2', source: 'castor_2', target: 'output_3' },
+        { id: 'e3', source: 'castor_2', target: 'start_1' },
+      ],
+    });
+
+    expect(
+      validateDefinition(definition).some((issue) => /start node cannot have incoming edges/.test(issue.message)),
+    ).toBe(true);
   });
 });

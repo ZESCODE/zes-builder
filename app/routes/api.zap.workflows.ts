@@ -1,5 +1,5 @@
 import { hubConfigured, zapCreateWorkflow, zapListWorkflows } from '~/lib/hub.server';
-import { requireAccess } from '~/lib/whop.server';
+import { callerPrincipal, requireAccess } from '~/lib/whop.server';
 
 export async function loader({ request }: { request: Request }) {
   const denied = await requireAccess(request);
@@ -13,7 +13,7 @@ export async function loader({ request }: { request: Request }) {
   }
 
   try {
-    const result = await zapListWorkflows();
+    const result = await zapListWorkflows(50, await callerPrincipal(request));
     return Response.json(result.data, { status: result.status });
   } catch (error) {
     return Response.json(
@@ -45,7 +45,7 @@ export async function action({ request }: { request: Request }) {
   }
 
   try {
-    const result = await zapCreateWorkflow(body);
+    const result = await zapCreateWorkflow(body, await callerPrincipal(request));
     return Response.json(result.data, { status: result.status });
   } catch (error) {
     return Response.json(

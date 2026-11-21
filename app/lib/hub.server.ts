@@ -14,12 +14,17 @@ function hubKey(): string {
   return key;
 }
 
-async function hubFetch(path: string, body: unknown): Promise<{ status: number; data: unknown }> {
+async function hubFetch(
+  path: string,
+  body: unknown,
+  principal?: string | null,
+): Promise<{ status: number; data: unknown }> {
   const response = await fetch(`${hubUrl()}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${hubKey()}`,
+      ...(principal ? { 'X-ZES-User': principal } : {}),
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(180_000),
@@ -30,11 +35,12 @@ async function hubFetch(path: string, body: unknown): Promise<{ status: number; 
   return { status: response.status, data };
 }
 
-async function hubGet(path: string): Promise<{ status: number; data: unknown }> {
+async function hubGet(path: string, principal?: string | null): Promise<{ status: number; data: unknown }> {
   const response = await fetch(`${hubUrl()}${path}`, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${hubKey()}`,
+      ...(principal ? { 'X-ZES-User': principal } : {}),
     },
     signal: AbortSignal.timeout(60_000),
   });
@@ -82,8 +88,8 @@ export type ZapJobInput = {
   ownerEmail?: string;
 };
 
-export async function zapCreateJob(input: ZapJobInput) {
-  return hubFetch('/api/v1/jobs', input);
+export async function zapCreateJob(input: ZapJobInput, principal?: string | null) {
+  return hubFetch('/api/v1/jobs', input, principal);
 }
 
 export async function zapListJobs(limit = 25) {
@@ -123,28 +129,29 @@ export async function zapListAgents() {
   return hubGet('/api/v1/agents');
 }
 
-export async function zapListWorkflows() {
-  return hubGet('/api/v1/workflows');
+export async function zapListWorkflows(limit = 25, principal?: string | null) {
+  return hubGet(`/api/v1/workflows?limit=${encodeURIComponent(limit)}`, principal);
 }
 
-export async function zapGetWorkflow(workflowId: string) {
-  return hubGet(`/api/v1/workflows/${encodeURIComponent(workflowId)}`);
+export async function zapGetWorkflow(workflowId: string, principal?: string | null) {
+  return hubGet(`/api/v1/workflows/${encodeURIComponent(workflowId)}`, principal);
 }
 
-export async function zapWorkflowVersions(workflowId: string) {
-  return hubGet(`/api/v1/workflows/${encodeURIComponent(workflowId)}/versions`);
+export async function zapWorkflowVersions(workflowId: string, principal?: string | null) {
+  return hubGet(`/api/v1/workflows/${encodeURIComponent(workflowId)}/versions`, principal);
 }
 
-export async function zapCreateWorkflow(definition: unknown) {
-  return hubFetch('/api/v1/workflows', definition);
+export async function zapCreateWorkflow(definition: unknown, principal?: string | null) {
+  return hubFetch('/api/v1/workflows', definition, principal);
 }
 
-export async function zapUpdateWorkflow(workflowId: string, definition: unknown) {
+export async function zapUpdateWorkflow(workflowId: string, definition: unknown, principal?: string | null) {
   const response = await fetch(`${hubUrl()}/api/v1/workflows/${encodeURIComponent(workflowId)}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${hubKey()}`,
+      ...(principal ? { 'X-ZES-User': principal } : {}),
     },
     body: JSON.stringify(definition),
     signal: AbortSignal.timeout(60_000),
@@ -155,11 +162,12 @@ export async function zapUpdateWorkflow(workflowId: string, definition: unknown)
   return { status: response.status, data };
 }
 
-export async function zapDeleteWorkflow(workflowId: string) {
+export async function zapDeleteWorkflow(workflowId: string, principal?: string | null) {
   const response = await fetch(`${hubUrl()}/api/v1/workflows/${encodeURIComponent(workflowId)}`, {
     method: 'DELETE',
     headers: {
       Authorization: `Bearer ${hubKey()}`,
+      ...(principal ? { 'X-ZES-User': principal } : {}),
     },
     signal: AbortSignal.timeout(60_000),
   });
@@ -169,8 +177,8 @@ export async function zapDeleteWorkflow(workflowId: string) {
   return { status: response.status, data };
 }
 
-export async function zapPublishWorkflow(workflowId: string, version?: number) {
-  return hubFetch(`/api/v1/workflows/${encodeURIComponent(workflowId)}/publish`, version ? { version } : {});
+export async function zapPublishWorkflow(workflowId: string, version?: number, principal?: string | null) {
+  return hubFetch(`/api/v1/workflows/${encodeURIComponent(workflowId)}/publish`, version ? { version } : {}, principal);
 }
 
 export async function zapNodeTypes() {

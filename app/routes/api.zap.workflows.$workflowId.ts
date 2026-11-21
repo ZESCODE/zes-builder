@@ -1,5 +1,5 @@
 import { hubConfigured, zapDeleteWorkflow, zapGetWorkflow, zapUpdateWorkflow } from '~/lib/hub.server';
-import { requireAccess } from '~/lib/whop.server';
+import { callerPrincipal, requireAccess } from '~/lib/whop.server';
 
 export async function loader({ request, params }: { request: Request; params: { workflowId?: string } }) {
   const denied = await requireAccess(request);
@@ -17,7 +17,7 @@ export async function loader({ request, params }: { request: Request; params: { 
   }
 
   try {
-    const result = await zapGetWorkflow(params.workflowId);
+    const result = await zapGetWorkflow(params.workflowId, await callerPrincipal(request));
     return Response.json(result.data, { status: result.status });
   } catch (error) {
     return Response.json(
@@ -44,7 +44,7 @@ export async function action({ request, params }: { request: Request; params: { 
 
   if (request.method === 'DELETE') {
     try {
-      const result = await zapDeleteWorkflow(params.workflowId);
+      const result = await zapDeleteWorkflow(params.workflowId, await callerPrincipal(request));
       return Response.json(result.data, { status: result.status });
     } catch (error) {
       return Response.json(
@@ -65,7 +65,7 @@ export async function action({ request, params }: { request: Request; params: { 
   }
 
   try {
-    const result = await zapUpdateWorkflow(params.workflowId, body);
+    const result = await zapUpdateWorkflow(params.workflowId, body, await callerPrincipal(request));
     return Response.json(result.data, { status: result.status });
   } catch (error) {
     return Response.json(
