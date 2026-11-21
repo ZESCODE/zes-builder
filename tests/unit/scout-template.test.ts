@@ -27,13 +27,7 @@ describe('scout template', () => {
     const definition = createScoutDefinition(ref!);
 
     expect(validateDefinition(definition)).toEqual([]);
-    expect(definition.nodes.map((node) => node.type)).toEqual([
-      'castor',
-      'github_tool',
-      'john',
-      'verifier',
-      'output',
-    ]);
+    expect(definition.nodes.map((node) => node.type)).toEqual(['castor', 'github_tool', 'john', 'verifier', 'output']);
 
     const payload = JSON.stringify(definition);
 
