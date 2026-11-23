@@ -7,7 +7,7 @@ import { hubConfigured, zapNodeTypes } from '~/lib/hub.server';
 import type { NodeTypeDescriptor } from '~/lib/workflows/contract';
 
 export const meta: MetaFunction = () => {
-  return [{ title: 'Edit workflow — ZES' }];
+  return [{ title: 'Edit workflow — ZESCODE' }];
 };
 
 export async function loader({ params, request }: { params: { workflowId?: string }; request: Request }) {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { MetaFunction } from 'react-router';
+import { BrandLogo } from '~/components/brand/BrandLogo';
 import { Header } from '~/components/header/Header';
 import BackgroundRays from '~/components/ui/BackgroundRays';
 import { AccessGate } from '~/components/whop/AccessGate';
@@ -9,8 +10,8 @@ import { WorkflowLibrary } from '~/components/zap/WorkflowLibrary';
 
 export const meta: MetaFunction = () => {
   return [
-    { title: 'ZES Orchestration' },
-    { name: 'description', content: 'Run ZAP v1 jobs across the ZES agent council' },
+    { title: 'ZESCODE Workflows' },
+    { name: 'description', content: 'Run ZAP v1 jobs across the ZESCODE agent council' },
   ];
 };
 
@@ -259,9 +260,11 @@ export default function ZapDashboard() {
         <main className="relative z-10 mx-auto w-full max-w-6xl px-4 py-8">
           <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold mb-1">ZES Orchestration</h1>
+              <h1 className="mb-1 flex items-center gap-3 text-2xl font-semibold">
+                <BrandLogo className="h-10" label="ZESCODE Workflows" />
+              </h1>
               <p className="text-sm text-bolt-elements-textSecondary">
-                ZAP v1 jobs planned and executed by the agent council.
+                ZAP v1 jobs planned and executed by the ZESCODE agent council.
               </p>
             </div>
             <a

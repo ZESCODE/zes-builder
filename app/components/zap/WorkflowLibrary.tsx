@@ -140,7 +140,10 @@ export function WorkflowLibrary({ onJobStarted }: { onJobStarted?: (jobId: strin
   return (
     <section className="rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1/60 p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-bolt-elements-textSecondary">Workflows</h2>
+        <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-bolt-elements-textSecondary">
+          <img src="/zes-logo.webp" alt="ZESCODE logo" className="h-5 w-5" />
+          Workflow library
+        </h2>
         <div className="flex gap-2">
           <button
             type="button"

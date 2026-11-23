@@ -8,8 +8,8 @@ import type { NodeTypeDescriptor } from '~/lib/workflows/contract';
 
 export const meta: MetaFunction = () => {
   return [
-    { title: 'ZES Workflow Canvas' },
-    { name: 'description', content: 'Design ZAP workflows on a canvas and publish them to the hub' },
+    { title: 'ZESCODE Workflow Canvas' },
+    { name: 'description', content: 'Design ZESCODE ZAP workflows on a canvas and publish them to the hub' },
   ];
 };
 

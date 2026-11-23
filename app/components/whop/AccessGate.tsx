@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { BrandLogo } from '~/components/brand/BrandLogo';
 
 type Session = {
   signedIn: boolean;
@@ -45,17 +46,17 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-full w-full items-center justify-center bg-bolt-elements-background-depth-1 px-6">
       <div className="w-full max-w-md rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-8 text-bolt-elements-textPrimary">
-        <img src="/zes-builder-logo.svg" alt="ZES Builder" className="mb-6 h-10" />
+        <BrandLogo className="mb-6 h-11" label="ZESCODE" />
         <h1 className="text-xl font-semibold">Build websites with AI</h1>
         <p className="mt-2 text-sm text-bolt-elements-textSecondary">
-          ZES Builder is sold on Whop. Sign in with the Whop account you used to purchase access.
+          ZESCODE Builder is sold on Whop. Sign in with the Whop account you used to purchase access.
         </p>
 
         {session.signedIn ? (
           <>
             <p className="mt-6 rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-4 py-3 text-sm">
               Signed in as <strong>{session.user?.name || session.user?.username || 'your Whop account'}</strong>, but
-              this account has no active ZES Builder access.
+              this account has no active ZESCODE Builder access.
             </p>
             <a
               href={session.productUrl}
@@ -82,7 +83,7 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
               href={session.productUrl}
               className="mt-3 block w-full text-center text-xs text-bolt-elements-textSecondary underline"
             >
-              Buy ZES Builder on Whop
+              Buy ZESCODE Builder on Whop
             </a>
           </>
         )}

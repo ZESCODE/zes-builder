@@ -284,6 +284,12 @@ export function WorkflowCanvas({ descriptors, workflowId, jobId }: Props) {
   return (
     <div className="flex h-full w-full flex-col bg-bolt-elements-background-depth-1">
       <header className="flex flex-wrap items-center gap-2 border-b border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 px-3 py-2">
+        <a href="/zap" className="flex items-center gap-2 pr-1">
+          <img src="/zes-logo.webp" alt="ZESCODE logo" className="h-6 w-6" />
+          <span className="text-xs font-semibold uppercase tracking-wide text-bolt-elements-textSecondary">
+            Workflows
+          </span>
+        </a>
         <input
           className="w-48 rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-2 py-1.5 text-sm text-bolt-elements-textPrimary outline-none focus:border-accent-500"
           placeholder="Workflow name"

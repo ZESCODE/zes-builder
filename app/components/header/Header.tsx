@@ -1,6 +1,7 @@
 import { useStore } from '@nanostores/react';
 import { ClientOnly } from 'remix-utils/client-only';
 import { HeaderActionButtons } from './HeaderActionButtons.client';
+import { BrandLogo } from '~/components/brand/BrandLogo';
 import { PollinationsImageButton } from '~/components/chat/PollinationsImageButton';
 import { ChatDescription } from '~/lib/persistence/ChatDescription.client';
 import { chatStore } from '~/lib/stores/chat';
@@ -19,7 +20,7 @@ export function Header() {
       <div className="flex items-center gap-2 z-logo text-bolt-elements-textPrimary cursor-pointer">
         <div className="i-ph:sidebar-simple-duotone text-xl" />
         <a href="/" className="text-2xl font-semibold text-accent flex items-center">
-          <img src="/zes-builder-logo.svg" alt="ZES Builder" className="h-9 w-auto inline-block" />
+          <BrandLogo className="h-9" label="ZESCODE" />
         </a>
       </div>
       <div className="ml-3">

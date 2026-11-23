@@ -9,15 +9,15 @@ import { AccessGate } from '~/components/whop/AccessGate';
 
 export const meta: MetaFunction = () => {
   return [
-    { title: 'ZES Builder — AI website builder' },
+    { title: 'ZESCODE Builder — AI website builder' },
     {
       name: 'description',
-      content: 'Describe a website and ZES Builder writes, previews and deploys it in your browser.',
+      content: 'Describe a website and ZESCODE Builder writes, previews and deploys it in your browser.',
     },
-    { property: 'og:title', content: 'ZES Builder — AI website builder' },
+    { property: 'og:title', content: 'ZESCODE Builder — AI website builder' },
     {
       property: 'og:description',
-      content: 'Describe a website and ZES Builder writes, previews and deploys it in your browser.',
+      content: 'Describe a website and ZESCODE Builder writes, previews and deploys it in your browser.',
     },
     { property: 'og:type', content: 'website' },
   ];
