@@ -1,0 +1,45 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "zes-cms-api",
+  "main": "./index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+  },
+  "upload_source_maps": true,
+  "alias": {
+    "~": "../../app",
+  },
+  "vars": {
+    "STORAGE_BACKEND": "d1",
+    "CMS_SERVICE_ID": "zes-builder-web",
+    "CMS_ASSERTION_AUDIENCE": "zes-cms-api",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "zes-builder",
+      "database_id": "ca6f8df5-35a7-49d6-b912-727aa78291b8",
+      "migrations_dir": "../../migrations",
+    },
+  ],
+  "env": {
+    "preview": {
+      "name": "zes-cms-api-preview",
+      "vars": {
+        "STORAGE_BACKEND": "d1",
+        "CMS_SERVICE_ID": "zes-builder-web",
+        "CMS_ASSERTION_AUDIENCE": "zes-cms-api",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "zes-builder-preview",
+          "database_id": "0062fbf8-5cd3-4552-9115-ec3edd3e933c",
+          "migrations_dir": "../../migrations",
+        },
+      ],
+    },
+  },
+}

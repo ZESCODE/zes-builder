@@ -1,194 +1,120 @@
-name: Preview Deployment
+name: Preview CMS Worker
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, closed]
+  push:
     branches: [main]
+  workflow_dispatch:
 
-# Cancel in-progress runs on the same PR
 concurrency:
-  group: preview-${{ github.event.pull_request.number }}
+  group: preview-cms-worker
   cancel-in-progress: true
 
 permissions:
   contents: read
-  pull-requests: write
   deployments: write
 
-jobs:
-  deploy-preview:
-    name: Deploy Preview
-    runs-on: ubuntu-latest
-    if: github.event.action != 'closed'
-    
-    steps:
-      - name: Check if preview deployment is configured
-        id: check-secrets
-        run: |
-          if [[ -n "${{ secrets.CLOUDFLARE_API_TOKEN }}" && -n "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]]; then
-            echo "configured=true" >> $GITHUB_OUTPUT
-          else
-            echo "configured=false" >> $GITHUB_OUTPUT
-          fi
+env:
+  PREVIEW_D1_DATABASE_ID: 0062fbf8-5cd3-4552-9115-ec3edd3e933c
+  PREVIEW_ISOLATION_EXPECTATIONS: '{"workers/cms-api/wrangler.jsonc":{"workerName":"zes-cms-api-preview","databaseId":"0062fbf8-5cd3-4552-9115-ec3edd3e933c"},"wrangler.jsonc":{"databaseId":"0062fbf8-5cd3-4552-9115-ec3edd3e933c"}}'
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_SEND_METRICS: 'false'
 
+jobs:
+  deploy-preview-cms-worker:
+    name: Deploy Preview CMS Worker
+    runs-on: ubuntu-latest
+    environment:
+      name: preview
+
+    steps:
       - name: Checkout
-        if: steps.check-secrets.outputs.configured == 'true'
         uses: actions/checkout@v7
 
-      - name: Setup and Build
-        if: steps.check-secrets.outputs.configured == 'true'
-        uses: ./.github/actions/setup-and-build
+      # The guard runs before every step that can touch Cloudflare. It fails the
+      # job when the preview environment is missing, when the preview worker
+      # name or the preview database id is not the expected one, or when the
+      # preview configuration shares the production worker or database.
+      - name: Verify preview isolation
+        run: node scripts/check-preview-isolation.mjs
 
-      - name: Build for production
-        if: steps.check-secrets.outputs.configured == 'true'
-        run: pnpm run build
+      - name: Resolve deployment target
+        run: |
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs';
+            import { normalizeJsonc } from './scripts/check-preview-isolation.mjs';
+
+            const config = JSON.parse(normalizeJsonc(readFileSync('workers/cms-api/wrangler.jsonc', 'utf8')));
+            const preview = config.env?.preview;
+
+            if (!preview?.name) {
+              console.error('the env.preview section of workers/cms-api/wrangler.jsonc is missing');
+              process.exit(1);
+            }
+
+            const database = (preview.d1_databases ?? [])[0];
+
+            console.log('worker: ' + preview.name);
+            console.log('database: ' + (database?.database_name ?? 'none'));
+            console.log('database_id: ' + (database?.database_id ?? 'none'));
+
+            if (preview.name !== 'zes-cms-api-preview') {
+              console.error('refusing to deploy a worker named ' + preview.name);
+              process.exit(1);
+            }
+          "
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # Only env.preview is deployed. The top-level configuration of the Worker
+      # points at the production database and at the production worker name, and
+      # the guard above has already verified that the preview environment exists
+      # and is isolated. The configuration is passed explicitly so that a stale
+      # redirect configuration of the root build cannot redirect the deployment.
+      - name: Deploy preview CMS Worker
+        run: pnpm exec wrangler deploy --config workers/cms-api/wrangler.jsonc --env preview
+
+      # The two secrets are read from the GitHub environment and written to the
+      # preview Worker through stdin, so they never appear in an argument, in a
+      # log line or in the workflow file.
+      - name: Sync preview Worker secrets
         env:
-          NODE_ENV: production
-
-      - name: Deploy preview to Cloudflare Workers
-        if: steps.check-secrets.outputs.configured == 'true'
-        id: deploy
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy --env-name=preview-${{ github.head_ref }} --branch=${{ github.head_ref }}
-
-      - name: Preview deployment not configured
-        if: steps.check-secrets.outputs.configured == 'false'
+          CMS_SERVICE_TOKEN: ${{ secrets.CMS_SERVICE_TOKEN }}
+          CMS_ASSERTION_SECRET: ${{ secrets.CMS_ASSERTION_SECRET }}
         run: |
-          echo "✅ Preview deployment is not configured for this repository"
-          echo "To enable preview deployments, add the following secrets:"
-          echo "- CLOUDFLARE_API_TOKEN"
-          echo "- CLOUDFLARE_ACCOUNT_ID"
-          echo "This is optional and the workflow will pass without it."
-          echo "url=https://preview-not-configured.example.com" >> $GITHUB_OUTPUT
+          printf '%s' "$CMS_SERVICE_TOKEN" | pnpm exec wrangler secret put CMS_SERVICE_TOKEN --config workers/cms-api/wrangler.jsonc --env preview
+          printf '%s' "$CMS_ASSERTION_SECRET" | pnpm exec wrangler secret put CMS_ASSERTION_SECRET --config workers/cms-api/wrangler.jsonc --env preview
 
-      - name: Add preview URL comment to PR
-        uses: actions/github-script@v9
-        continue-on-error: true
-        with:
-          script: |
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const previewComment = comments.find(comment => 
-              comment.body.includes('🚀 Preview deployment')
-            );
-
-            const isConfigured = '${{ steps.check-secrets.outputs.configured }}' === 'true';
-            const deployUrl = '${{ steps.deploy.outputs.deployment-url }}' || 'https://preview-not-configured.example.com';
-
-            let commentBody;
-            if (isConfigured) {
-              commentBody = `🚀 Preview deployment is ready!
-
-              | Name | Link |
-              |------|------|
-              | Latest commit | ${{ github.sha }} |
-              | Preview URL | ${deployUrl} |
-
-              Built with ❤️ by [bolt.diy](https://bolt.diy)
-              `;
-            } else {
-              commentBody = `ℹ️ Preview deployment not configured
-
-              | Name | Info |
-              |------|------|
-              | Latest commit | ${{ github.sha }} |
-              | Status | Preview deployment requires Cloudflare secrets |
-
-              To enable preview deployments, repository maintainers can add:
-              - \`CLOUDFLARE_API_TOKEN\` secret
-              - \`CLOUDFLARE_ACCOUNT_ID\` secret
-
-              Built with ❤️ by [bolt.diy](https://bolt.diy)
-              `;
-            }
-
-            if (previewComment) {
-              github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: previewComment.id,
-                body: commentBody
-              });
-            } else {
-              github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: commentBody
-              });
-            }
-
-      - name: Run smoke tests on preview
+      - name: Verify preview Worker configuration
         run: |
-          if [[ "${{ steps.check-secrets.outputs.configured }}" == "true" ]]; then
-            echo "Running smoke tests on preview deployment..."
-            echo "Preview URL: ${{ steps.deploy.outputs.url }}"
-            # Basic HTTP check instead of Playwright tests
-            curl -f ${{ steps.deploy.outputs.url }} || echo "Preview environment check completed"
-          else
-            echo "✅ Smoke tests skipped - preview deployment not configured"
-            echo "This is normal and expected when Cloudflare secrets are not available"
-          fi
+          pnpm exec wrangler secret list --config workers/cms-api/wrangler.jsonc --env preview > secret-list.txt
+          grep -q '^CMS_SERVICE_TOKEN' secret-list.txt
+          grep -q '^CMS_ASSERTION_SECRET' secret-list.txt
+          rm -f secret-list.txt
+          pnpm exec wrangler deployments list --config workers/cms-api/wrangler.jsonc --env preview
 
-      - name: Preview workflow summary
+      - name: Check preview Worker health
         run: |
-          echo "✅ Preview deployment workflow completed successfully"
-          if [[ "${{ steps.check-secrets.outputs.configured }}" == "true" ]]; then
-            echo "🚀 Preview deployed to: ${{ steps.deploy.outputs.url }}"
-          else
-            echo "ℹ️ Preview deployment not configured (this is normal)"
-          fi
+          status=$(curl -s -o health.json -w '%{http_code}' https://zes-cms-api-preview.zescode.workers.dev/api/health)
+          cat health.json
+          rm -f health.json
+          test "$status" = "200"
 
-  cleanup-preview:
-    name: Cleanup Preview
-    runs-on: ubuntu-latest
-    if: github.event.action == 'closed'
-
-    steps:
-      - name: Delete preview environment
-        uses: actions/github-script@v9
-        continue-on-error: true
-        with:
-          script: |
-            const deployments = await github.rest.repos.listDeployments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              environment: `preview-pr-${{ github.event.pull_request.number }}`,
-            });
-
-            for (const deployment of deployments.data) {
-              await github.rest.repos.createDeploymentStatus({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                deployment_id: deployment.id,
-                state: 'inactive',
-              });
-            }
-
-      - name: Remove preview comment
-        uses: actions/github-script@v9
-        continue-on-error: true
-        with:
-          script: |
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            for (const comment of comments) {
-              if (comment.body.includes('🚀 Preview deployment')) {
-                await github.rest.issues.deleteComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  comment_id: comment.id,
-                });
-              }
-            }
+      - name: Preview CMS Worker workflow summary
+        run: |
+          echo "✅ preview CMS Worker deployed"
+          echo "worker: zes-cms-api-preview"
+          echo "url: https://zes-cms-api-preview.zescode.workers.dev"
+          echo "database: zes-builder-preview"

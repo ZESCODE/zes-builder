@@ -77,4 +77,6 @@ export default [
   { file: 'routes/api.auth.callback.whop.ts', path: '/api/auth/callback/whop' },
   { file: 'routes/api.auth.logout.ts', path: '/api/auth/logout' },
   { file: 'routes/api.whop.session.ts', path: '/api/whop/session' },
+  { file: 'routes/websites.ts', path: '/api/websites' },
+  { file: 'routes/websites.$websiteId.ts', path: '/api/websites/:websiteId' },
 ] satisfies RouteConfig;

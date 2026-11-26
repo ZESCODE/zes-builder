@@ -1,3 +1,21 @@
+interface __BaseEnv_Env {
+	DB: D1Database;
+	STORAGE_BACKEND: string;
+}
+declare namespace Cloudflare {
+	interface GlobalProps {
+		mainModule: typeof import("./workers/app");
+	}
+	interface Env extends __BaseEnv_Env {}
+}
+interface Env extends __BaseEnv_Env {}
+type StringifyValues<EnvType extends Record<string, unknown>> = {
+	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
+};
+declare namespace NodeJS {
+	interface ProcessEnv extends StringifyValues<Partial<Pick<Cloudflare.Env, "STORAGE_BACKEND">>> {}
+}
+
 interface Env {
   RUNNING_IN_DOCKER: Settings;
   DEFAULT_NUM_CTX: Settings;
