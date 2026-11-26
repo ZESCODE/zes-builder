@@ -97,12 +97,33 @@ jobs:
           printf '%s' "$CMS_SERVICE_TOKEN" | pnpm exec wrangler secret put CMS_SERVICE_TOKEN --config workers/cms-api/wrangler.jsonc --env preview
           printf '%s' "$CMS_ASSERTION_SECRET" | pnpm exec wrangler secret put CMS_ASSERTION_SECRET --config workers/cms-api/wrangler.jsonc --env preview
 
+      # wrangler prints the secret inventory as JSON, so the names are parsed
+      # instead of matched line by line. The fallback keeps the check working
+      # when wrangler prints the legacy "name: type" listing.
       - name: Verify preview Worker configuration
         run: |
-          pnpm exec wrangler secret list --config workers/cms-api/wrangler.jsonc --env preview > secret-list.txt
-          grep -q '^CMS_SERVICE_TOKEN' secret-list.txt
-          grep -q '^CMS_ASSERTION_SECRET' secret-list.txt
-          rm -f secret-list.txt
+          pnpm exec wrangler secret list --format json --config workers/cms-api/wrangler.jsonc --env preview > secret-list.json
+          node -e '
+            const fs = require("node:fs");
+            const raw = fs.readFileSync("secret-list.json", "utf8");
+            let names = [];
+            try {
+              names = JSON.parse(raw).map((entry) => entry.name);
+            } catch {
+              names = raw
+                .split("\n")
+                .map((line) => line.split(":")[0].replace(/[^A-Za-z0-9_]/g, ""))
+                .filter(Boolean);
+            }
+            for (const required of ["CMS_SERVICE_TOKEN", "CMS_ASSERTION_SECRET"]) {
+              if (!names.includes(required)) {
+                console.error("missing preview secret: " + required);
+                process.exit(1);
+              }
+              console.log("secret present: " + required);
+            }
+          '
+          rm -f secret-list.json
           pnpm exec wrangler deployments list --config workers/cms-api/wrangler.jsonc --env preview
 
       - name: Check preview Worker health
