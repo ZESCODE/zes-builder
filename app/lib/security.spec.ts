@@ -1,7 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { checkRateLimit, createSecurityHeaders, withSecurity } from './security';
 
 describe('security middleware', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   describe('checkRateLimit', () => {
     it('allows requests within the limit', () => {
       const request = new Request('https://example.com/api/test', {
@@ -49,6 +53,67 @@ describe('security middleware', () => {
       });
 
       expect(checkRateLimit(request, '/api/chat')).toEqual({ allowed: false, unavailable: true });
+    });
+
+    describe('on the Vercel edge', () => {
+      it('uses the last forwarded-for entry, which is the one the platform appended', () => {
+        vi.stubEnv('VERCEL', '1');
+
+        const request = new Request('https://example.com/api/chat', {
+          headers: { 'x-forwarded-for': '203.0.113.9, 198.51.100.7' },
+        });
+
+        expect(checkRateLimit(request, '/api/chat')).toEqual({ allowed: true });
+      });
+
+      it('keeps a caller supplied first entry out of the rate limit key', () => {
+        vi.stubEnv('VERCEL', '1');
+
+        const spoofed = new Request('https://example.com/api/chat', {
+          headers: { 'x-forwarded-for': '203.0.113.9, 198.51.100.7' },
+        });
+        const direct = new Request('https://example.com/api/chat', {
+          headers: { 'x-forwarded-for': '198.51.100.7' },
+        });
+
+        /*
+         * Both requests must share one key, otherwise a caller could rotate the
+         * first entry of the chain and get an unlimited budget.
+         */
+        for (let i = 0; i < 60; i++) {
+          checkRateLimit(spoofed, '/api/chat');
+        }
+
+        expect(checkRateLimit(direct, '/api/chat').allowed).toBe(false);
+      });
+
+      it('falls back to x-real-ip when there is no forwarded-for chain', () => {
+        vi.stubEnv('VERCEL', '1');
+
+        const request = new Request('https://example.com/api/chat', {
+          headers: { 'x-real-ip': '198.51.100.8' },
+        });
+
+        expect(checkRateLimit(request, '/api/chat')).toEqual({ allowed: true });
+      });
+
+      it('still fails closed when the platform sends no address at all', () => {
+        vi.stubEnv('VERCEL', '1');
+
+        const request = new Request('https://example.com/api/chat');
+
+        expect(checkRateLimit(request, '/api/chat')).toEqual({ allowed: false, unavailable: true });
+      });
+
+      it('ignores the platform headers outside Vercel', () => {
+        vi.stubEnv('VERCEL', '');
+
+        const request = new Request('https://example.com/api/chat', {
+          headers: { 'x-forwarded-for': '198.51.100.7', 'x-real-ip': '198.51.100.7' },
+        });
+
+        expect(checkRateLimit(request, '/api/chat')).toEqual({ allowed: false, unavailable: true });
+      });
     });
   });
 

@@ -117,7 +117,47 @@ export function getTrustedClientIP(request: Request, context?: unknown): string 
     return normalizeIpAddress(request.headers.get('x-real-ip'));
   }
 
+  /*
+   * Vercel edge. `process.env.VERCEL` is injected by the platform, so this
+   * branch only runs behind the Vercel edge and never on an origin that a
+   * caller can reach directly.
+   *
+   * Vercel appends the client address to an incoming `x-forwarded-for` chain,
+   * so only the last entry of that chain was written by the platform - a
+   * caller supplied first entry is not trusted. `x-real-ip` is used as a
+   * fallback only when the chain is absent.
+   */
+  if (process.env.VERCEL === '1') {
+    return getVercelClientIP(request);
+  }
+
   return undefined;
+}
+
+function getVercelClientIP(request: Request): string | undefined {
+  const forwardedFor = request.headers.get('x-forwarded-for');
+
+  if (forwardedFor) {
+    const chain = forwardedFor
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+
+    const last = chain[chain.length - 1];
+    const address = normalizeIpAddress(last);
+
+    if (address) {
+      return address;
+    }
+  }
+
+  const realIp = normalizeIpAddress(request.headers.get('x-real-ip'));
+
+  if (realIp) {
+    return realIp;
+  }
+
+  return normalizeIpAddress(request.headers.get('x-vercel-forwarded-for'));
 }
 
 function normalizeIpAddress(value: string | null): string | undefined {
