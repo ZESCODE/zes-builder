@@ -1,5 +1,87 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router';
+import { withSecurity } from '~/lib/security';
 import type { VercelProjectInfo } from '~/types/vercel';
+
+const ZES_OWNED_PROJECT_IDS = new Set(['prj_w2rAtbukOEw7tU35XYWW1KpZgQAa']);
+const MAX_DEPLOYMENT_FILES = 200;
+const MAX_FILE_BYTES = 1_000_000;
+const MAX_TOTAL_BYTES = 5_000_000;
+
+function readBearerToken(request: Request): string | undefined {
+  const header = request.headers.get('Authorization');
+
+  if (header?.startsWith('Bearer ')) {
+    const value = header.slice('Bearer '.length).trim();
+
+    if (value) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function clientExposedCredentialError(): string | undefined {
+  return process.env.VITE_VERCEL_ACCESS_TOKEN
+    ? 'a VITE_-prefixed Vercel credential is present in the server environment; remove it before using this endpoint'
+    : undefined;
+}
+
+function isZesOwnedProject(projectId: string | undefined): boolean {
+  return projectId ? ZES_OWNED_PROJECT_IDS.has(projectId) : false;
+}
+
+function normalizeDeploymentPath(filePath: string): string | null {
+  const normalized = filePath.startsWith('/') ? filePath.slice(1) : filePath;
+
+  if (!normalized || normalized.includes('..')) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function byteLength(content: string): number {
+  return new TextEncoder().encode(content ?? '').length;
+}
+
+async function readProject(token: string, projectId: string) {
+  const response = await fetch(`https://api.vercel.com/v9/projects/${projectId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    return undefined;
+  }
+
+  return (await response.json()) as {
+    id: string;
+    name: string;
+    account?: { id?: string; name?: string };
+  };
+}
+
+async function tokenBelongsToProjectAccount(token: string, projectAccountId?: string): Promise<boolean> {
+  if (!projectAccountId) {
+    return true;
+  }
+
+  const response = await fetch('https://api.vercel.com/v2/user', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    return true;
+  }
+
+  const payload = (await response.json()) as { user?: { id?: string } };
+  const userId = payload.user?.id;
+
+  return !userId || userId === projectAccountId;
+}
 
 // Function to detect framework from project files
 const detectFramework = (files: Record<string, string>): string => {
@@ -173,28 +255,46 @@ const detectFramework = (files: Record<string, string>): string => {
 };
 
 // Add loader function to handle GET requests
-export async function loader({ request }: LoaderFunctionArgs) {
+async function vercelDeployLoader({ request }: { request: Request; context?: any }) {
+  const credentialError = clientExposedCredentialError();
+
+  if (credentialError) {
+    return Response.json({ error: credentialError }, { status: 500 });
+  }
+
   const url = new URL(request.url);
   const projectId = url.searchParams.get('projectId');
-  const token = url.searchParams.get('token');
+  const token = readBearerToken(request);
 
-  if (!projectId || !token) {
-    return Response.json({ error: 'Missing projectId or token' }, { status: 400 });
+  if (!projectId) {
+    return Response.json({ error: 'Missing projectId' }, { status: 400 });
+  }
+
+  if (!token) {
+    return Response.json({ error: 'Missing bearer token' }, { status: 401 });
+  }
+
+  if (isZesOwnedProject(projectId)) {
+    return Response.json(
+      { error: 'This project is released by the ZES release pipeline and cannot be deployed through this endpoint' },
+      { status: 403 },
+    );
   }
 
   try {
     // Get project info
-    const projectResponse = await fetch(`https://api.vercel.com/v9/projects/${projectId}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    const projectData = await readProject(token, projectId);
 
-    if (!projectResponse.ok) {
+    if (!projectData) {
       return Response.json({ error: 'Failed to fetch project' }, { status: 400 });
     }
 
-    const projectData = (await projectResponse.json()) as any;
+    if (!(await tokenBelongsToProjectAccount(token, projectData.account?.id))) {
+      return Response.json(
+        { error: 'The supplied token does not belong to the account that owns the project' },
+        { status: 403 },
+      );
+    }
 
     // Get latest deployment
     const deploymentsResponse = await fetch(`https://api.vercel.com/v6/deployments?projectId=${projectId}&limit=1`, {
@@ -233,21 +333,35 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 interface DeployRequestBody {
   projectId?: string;
-  files: Record<string, string>;
+  files?: Record<string, string>;
   sourceFiles?: Record<string, string>;
+  token?: string;
   chatId: string;
   framework?: string;
 }
 
 // Existing action function for POST requests
-export async function action({ request }: ActionFunctionArgs) {
+async function vercelDeployAction({ request }: { request: Request; context?: any }) {
   try {
-    const { projectId, files, sourceFiles, token, chatId, framework } = (await request.json()) as DeployRequestBody & {
-      token: string;
-    };
+    const credentialError = clientExposedCredentialError();
+
+    if (credentialError) {
+      return Response.json({ error: credentialError }, { status: 500 });
+    }
+
+    const body = (await request.json()) as DeployRequestBody;
+    const { projectId, files, sourceFiles, chatId, framework } = body;
+    const token = body.token || readBearerToken(request);
 
     if (!token) {
       return Response.json({ error: 'Not connected to Vercel' }, { status: 401 });
+    }
+
+    if (isZesOwnedProject(projectId)) {
+      return Response.json(
+        { error: 'This project is released by the ZES release pipeline and cannot be deployed through this endpoint' },
+        { status: 403 },
+      );
     }
 
     let targetProjectId = projectId;
@@ -295,14 +409,16 @@ export async function action({ request }: ActionFunctionArgs) {
       };
     } else {
       // Get existing project info
-      const projectResponse = await fetch(`https://api.vercel.com/v9/projects/${targetProjectId}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const existingProject = await readProject(token, targetProjectId);
 
-      if (projectResponse.ok) {
-        const existingProject = (await projectResponse.json()) as any;
+      if (existingProject) {
+        if (!(await tokenBelongsToProjectAccount(token, existingProject.account?.id))) {
+          return Response.json(
+            { error: 'The supplied token does not belong to the account that owns the project' },
+            { status: 403 },
+          );
+        }
+
         projectInfo = {
           id: existingProject.id,
           name: existingProject.name,
@@ -344,6 +460,13 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     }
 
+    if (isZesOwnedProject(targetProjectId)) {
+      return Response.json(
+        { error: 'This project is released by the ZES release pipeline and cannot be deployed through this endpoint' },
+        { status: 403 },
+      );
+    }
+
     // Prepare files for deployment
     const deploymentFiles = [];
 
@@ -355,26 +478,47 @@ export async function action({ request }: ActionFunctionArgs) {
       detectedFramework &&
       ['nextjs', 'react', 'vite', 'remix', 'nuxt', 'sveltekit', 'astro', 'vue', 'angular'].includes(detectedFramework);
 
-    if (shouldIncludeSourceFiles && sourceFiles) {
-      // Include source files for frameworks that need to build
-      for (const [filePath, content] of Object.entries(sourceFiles)) {
-        // Ensure file path doesn't start with a slash for Vercel
-        const normalizedPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
-        deploymentFiles.push({
-          file: normalizedPath,
-          data: content,
-        });
+    const selectedFiles = shouldIncludeSourceFiles && sourceFiles ? sourceFiles : (files ?? {});
+    const selectedEntries = Object.entries(selectedFiles);
+
+    if (selectedEntries.length > MAX_DEPLOYMENT_FILES) {
+      return Response.json(
+        { error: `Too many files: ${selectedEntries.length} exceeds the limit of ${MAX_DEPLOYMENT_FILES}` },
+        { status: 413 },
+      );
+    }
+
+    let totalBytes = 0;
+
+    for (const [filePath, content] of selectedEntries) {
+      const normalizedPath = normalizeDeploymentPath(filePath);
+
+      if (!normalizedPath) {
+        return Response.json({ error: `Invalid file path: ${filePath}` }, { status: 400 });
       }
-    } else {
-      // For static sites, only include build output
-      for (const [filePath, content] of Object.entries(files)) {
-        // Ensure file path doesn't start with a slash for Vercel
-        const normalizedPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
-        deploymentFiles.push({
-          file: normalizedPath,
-          data: content,
-        });
+
+      const size = byteLength(content);
+
+      if (size > MAX_FILE_BYTES) {
+        return Response.json(
+          { error: `File too large: ${filePath} exceeds the limit of ${MAX_FILE_BYTES} bytes` },
+          { status: 413 },
+        );
       }
+
+      totalBytes += size;
+
+      if (totalBytes > MAX_TOTAL_BYTES) {
+        return Response.json(
+          { error: `Deployment payload exceeds the limit of ${MAX_TOTAL_BYTES} bytes` },
+          { status: 413 },
+        );
+      }
+
+      deploymentFiles.push({
+        file: normalizedPath,
+        data: content,
+      });
     }
 
     // Create deployment configuration based on framework
@@ -488,3 +632,13 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ error: 'Deployment failed' }, { status: 500 });
   }
 }
+
+export const loader = withSecurity(vercelDeployLoader, {
+  allowedMethods: ['GET'],
+  rateLimit: false,
+});
+
+export const action = withSecurity(vercelDeployAction, {
+  allowedMethods: ['POST'],
+  rateLimit: false,
+});

@@ -310,6 +310,32 @@ export function sanitizeErrorMessage(error: unknown, isDevelopment = false): str
 }
 
 /**
+ * Authentication check used by `withSecurity({ requireAuth: true })`.
+ *
+ * The default implementation requires a valid Whop session; when the Whop gate
+ * is enabled the session must also carry product access. A route can provide its
+ * own `authChecker` when it uses a different identity provider.
+ */
+export async function checkAuthentication(
+  request: Request,
+  context?: unknown,
+  checker?: (request: Request, context?: unknown) => Promise<boolean>,
+): Promise<boolean> {
+  if (checker) {
+    return checker(request, context);
+  }
+
+  const { gateEnabled, sessionStatus } = await import('./whop.server');
+  const status = await sessionStatus(request);
+
+  if (!status.signedIn) {
+    return false;
+  }
+
+  return gateEnabled() ? status.hasAccess : true;
+}
+
+/**
  * Security wrapper for API routes
  */
 export function withSecurity<T extends (args: ActionFunctionArgs | LoaderFunctionArgs) => Promise<Response>>(
@@ -318,6 +344,7 @@ export function withSecurity<T extends (args: ActionFunctionArgs | LoaderFunctio
     requireAuth?: boolean;
     rateLimit?: boolean;
     allowedMethods?: string[];
+    authChecker?: (request: Request, context?: unknown) => Promise<boolean>;
   } = {},
 ) {
   return async (args: ActionFunctionArgs | LoaderFunctionArgs): Promise<Response> => {
@@ -351,6 +378,17 @@ export function withSecurity<T extends (args: ActionFunctionArgs | LoaderFunctio
         status: 405,
         headers: createSecurityHeaders(request),
       });
+    }
+
+    if (options.requireAuth) {
+      const authenticated = await checkAuthentication(request, args.context, options.authChecker);
+
+      if (!authenticated) {
+        return new Response('Authentication required', {
+          status: 401,
+          headers: createSecurityHeaders(request),
+        });
+      }
     }
 
     // Apply rate limiting
