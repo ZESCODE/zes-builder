@@ -1,0 +1,701 @@
+name: Production Release
+
+# Single-owner production release pipeline.
+#
+# Barrier 1 (automatic Git deployments from main) lives in vercel.json:
+#   {"git": {"deploymentEnabled": {"main": false}}}
+#
+# Barrier 2 (deployment creation is separated from production promotion) lives in
+# the Vercel project setting "Auto-assign Custom Production Domains = false".
+# Every production build created here is STAGED. This workflow never promotes.
+#
+# The owner is the only operator: there are no required reviewers and no
+# self-review prevention. The explicit `workflow_dispatch` below IS the release
+# decision, and the GitHub Environment is used only as a credentials boundary
+# and as a deployment-history record.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Full 40-character commit SHA to release (must be reachable from main)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+env:
+  VERCEL_CLI_VERSION: 65.9.0
+  PRODUCTION_DOMAIN: app.zes.codes
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job A - Validate. No production credentials, no environment, no deployment.
+  # ---------------------------------------------------------------------------
+  validate:
+    name: Validate release candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.validate-sha.outputs.sha }}
+    steps:
+      - name: Verify the triggering actor is the repository owner
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          if [ "${ACTOR,,}" != "${OWNER,,}" ]; then
+            echo "::error::the release must be initiated by the repository owner (${OWNER}); actor was ${ACTOR}"
+            exit 1
+          fi
+          echo "actor=${ACTOR} repository_owner=${OWNER}"
+
+      - name: Verify the dispatch ref is main
+        env:
+          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+          if [ "$REF_TYPE" != "branch" ]; then
+            echo "::error::the workflow must be dispatched against a branch, got '${REF_TYPE}'"
+            exit 1
+          fi
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::the workflow must be dispatched from main, got '${REF}'"
+            exit 1
+          fi
+          echo "dispatch ref=${REF}"
+
+      - name: Validate the supplied commit SHA
+        id: validate-sha
+        env:
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$INPUT_REF" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::the ref input must be a full 40-character lowercase commit SHA"
+            exit 1
+          fi
+          echo "sha=$INPUT_REF" >> "$GITHUB_OUTPUT"
+          echo "release candidate=$INPUT_REF"
+
+      - name: Checkout the exact commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.validate-sha.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify the commit is an ancestor of origin/main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=50 origin main
+          if ! git merge-base --is-ancestor "${{ steps.validate-sha.outputs.sha }}" origin/main; then
+            echo "::error::the supplied SHA is not reachable from origin/main"
+            exit 1
+          fi
+          echo "the supplied SHA is reachable from origin/main"
+
+      - name: Verify CI status for the exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.validate-sha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          runs=$(gh api "repos/${{ github.repository }}/actions/runs?head_sha=${SHA}&per_page=100" \
+            --jq '[.workflow_runs[] | select(.path == ".github/workflows/ci.yaml")]')
+          count=$(printf '%s' "$runs" | jq 'length')
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no CI/CD workflow run was found for ${SHA}; refusing to release"
+            exit 1
+          fi
+          latest=$(printf '%s' "$runs" | jq -r 'max_by(.created_at) | "\(.conclusion) \(.html_url)"')
+          conclusion=$(printf '%s' "$runs" | jq -r 'max_by(.created_at) | .conclusion')
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::the latest CI/CD run for ${SHA} is '${conclusion}'; refusing to release"
+            exit 1
+          fi
+          echo "CI/CD run for ${SHA}: ${latest}"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Test
+        run: pnpm run test
+
+      - name: Production build (Node server target, matching the Vercel build)
+        env:
+          VERCEL: '1'
+        run: pnpm run build
+
+      - name: Validation summary
+        run: |
+          echo "validation passed for ${{ steps.validate-sha.outputs.sha }}"
+
+  # ---------------------------------------------------------------------------
+  # Job B - Staged production deployment. Production credentials live here only.
+  # The deployment is created as STAGED. Nothing is promoted.
+  # ---------------------------------------------------------------------------
+  staged-deployment:
+    name: Staged production deployment (no promotion)
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: production
+    permissions:
+      contents: read
+      deployments: write
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - name: Mask the Vercel token
+        run: echo "::add-mask::${VERCEL_TOKEN}"
+
+      - name: Revalidate actor, dispatch ref and commit SHA
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
+          SHA: ${{ needs.validate.outputs.sha }}
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          if [ "${ACTOR,,}" != "${OWNER,,}" ]; then
+            echo "::error::the release must be initiated by the repository owner (${OWNER}); actor was ${ACTOR}"
+            exit 1
+          fi
+          if [ "$REF_TYPE" != "branch" ] || [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::the workflow must be dispatched from main, got '${REF}'"
+            exit 1
+          fi
+          if ! printf '%s' "$INPUT_REF" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::the ref input must be a full 40-character lowercase commit SHA"
+            exit 1
+          fi
+          if [ "$INPUT_REF" != "$SHA" ]; then
+            echo "::error::the validated SHA and the dispatched SHA do not match"
+            exit 1
+          fi
+          echo "revalidated actor=${ACTOR} ref=${REF} sha=${SHA}"
+
+      - name: Checkout the exact commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify the commit is still an ancestor of origin/main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=50 origin main
+          if ! git merge-base --is-ancestor "${{ needs.validate.outputs.sha }}" origin/main; then
+            echo "::error::the supplied SHA is not reachable from origin/main"
+            exit 1
+          fi
+          echo "the supplied SHA is reachable from origin/main"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install the pinned Vercel CLI
+        run: npm install --global "vercel@${VERCEL_CLI_VERSION}"
+
+      - name: Verify the CLI version and the token
+        run: |
+          set -euo pipefail
+          vercel --version
+          vercel whoami --token "$VERCEL_TOKEN"
+
+      - name: Verify the exact project and team linkage
+        run: |
+          set -euo pipefail
+          mkdir -p .vercel
+          printf '{"projectId":"%s","orgId":"%s"}\n' "$VERCEL_PROJECT_ID" "$VERCEL_ORG_ID" > .vercel/project.json
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs';
+            const link = JSON.parse(readFileSync('.vercel/project.json', 'utf8'));
+            if (link.projectId !== process.env.VERCEL_PROJECT_ID) {
+              console.error('project link mismatch');
+              process.exit(1);
+            }
+            if (link.orgId !== process.env.VERCEL_ORG_ID) {
+              console.error('team link mismatch');
+              process.exit(1);
+            }
+            console.log('project link: ' + link.projectId + ' / team ' + link.orgId);
+          "
+          node --input-type=module -e "
+            const response = await fetch('https://api.vercel.com/v9/projects/' + process.env.VERCEL_PROJECT_ID, {
+              headers: { Authorization: 'Bearer ' + process.env.VERCEL_TOKEN },
+            });
+            if (!response.ok) {
+              console.error('the token cannot read the project');
+              process.exit(1);
+            }
+            const project = await response.json();
+            if (project.id !== process.env.VERCEL_PROJECT_ID) {
+              console.error('project id mismatch');
+              process.exit(1);
+            }
+            if (project.account?.id !== process.env.VERCEL_ORG_ID) {
+              console.error('team mismatch: ' + project.account?.id);
+              process.exit(1);
+            }
+            if (project.link?.productionBranch !== 'main') {
+              console.error('unexpected production branch: ' + project.link?.productionBranch);
+              process.exit(1);
+            }
+            console.log('verified project ' + project.id + ' (' + project.name + ') in team ' + project.account.id);
+          "
+
+      - name: Pull production project settings and environment
+        run: vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
+
+      - name: Build the production artifact
+        run: vercel build --prod --token "$VERCEL_TOKEN"
+
+      - name: Record the production state before the deployment
+        id: before
+        run: |
+          set -euo pipefail
+          node --input-type=module -e "
+            const headers = { Authorization: 'Bearer ' + process.env.VERCEL_TOKEN };
+            const projectUrl = 'https://api.vercel.com/v9/projects/' + process.env.VERCEL_PROJECT_ID;
+
+            async function readJson(response, label) {
+              if (!response.ok) {
+                throw new Error(label + ' request failed with HTTP ' + response.status);
+              }
+              try {
+                return await response.json();
+              } catch (error) {
+                throw new Error(label + ' returned a non-JSON response');
+              }
+            }
+
+            let project;
+            let domainsPayload;
+            try {
+              project = await readJson(await fetch(projectUrl, { headers }), 'the project configuration');
+              domainsPayload = await readJson(await fetch(projectUrl + '/domains', { headers }), 'the project domains');
+            } catch (error) {
+              console.error('CANNOT VERIFY THE PRODUCTION STATE: ' + error.message);
+              console.error('refusing to continue: the production state must be verified before a staged deployment is created.');
+              process.exit(1);
+            }
+
+            if (!domainsPayload || !Array.isArray(domainsPayload.domains)) {
+              console.error('CANNOT VERIFY THE PRODUCTION STATE: the project domains response does not contain a domains array');
+              process.exit(1);
+            }
+
+            const domainNames = [];
+            for (const entry of domainsPayload.domains) {
+              if (!entry || typeof entry.name !== 'string' || entry.name.length === 0) {
+                console.error('CANNOT VERIFY THE PRODUCTION STATE: the project domains response contains an entry without a name');
+                process.exit(1);
+              }
+              domainNames.push(entry.name);
+            }
+
+            const production = project.targets?.production ?? {};
+            const aliases = production.alias ?? [];
+
+            if (!production.id) {
+              console.error('CANNOT VERIFY THE PRODUCTION STATE: no current production deployment found');
+              process.exit(1);
+            }
+            if (!Array.isArray(aliases) || aliases.length === 0) {
+              console.error('CANNOT VERIFY THE PRODUCTION STATE: the current production deployment has no recorded aliases; refusing to continue');
+              process.exit(1);
+            }
+            if (typeof project.autoAssignCustomDomains !== 'boolean') {
+              console.error('CANNOT VERIFY THE PRODUCTION STATE: autoAssignCustomDomains is missing or not a boolean (' + JSON.stringify(project.autoAssignCustomDomains) + ')');
+              process.exit(1);
+            }
+
+            console.log('current production deployment: ' + production.id);
+            console.log('current production aliases (' + aliases.length + '): ' + aliases.join(','));
+            console.log('current aliasAssigned: ' + (production.aliasAssigned ?? 'none'));
+            console.log('autoAssignCustomDomains: ' + project.autoAssignCustomDomains);
+            console.log('project domains (' + domainNames.length + '): ' + domainNames.slice().sort().join(','));
+
+            const snapshot = {
+              productionId: production.id,
+              productionAliases: aliases,
+              aliasAssigned: production.aliasAssigned ?? null,
+              autoAssignCustomDomains: project.autoAssignCustomDomains,
+              domains: domainNames.slice().sort(),
+            };
+
+            const fs = await import('node:fs');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'production_id=' + production.id + '\n');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'production_snapshot=' + JSON.stringify(snapshot) + '\n');
+          "
+
+      - name: Create the staged production deployment
+        id: deploy
+        run: |
+          set -euo pipefail
+          output=$(vercel deploy --prebuilt --prod --skip-domain --yes --token "$VERCEL_TOKEN" 2>&1) || {
+            printf '%s\n' "$output"
+            exit 1
+          }
+          printf '%s\n' "$output"
+          url=$(printf '%s' "$output" \
+            | grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' \
+            | grep -vx 'https://zes-builder.vercel.app' \
+            | head -n 1 || true)
+          if [ -z "$url" ]; then
+            echo "::error::the staged deployment URL could not be parsed from the CLI output"
+            exit 1
+          fi
+          id=$(printf '%s' "$output" | grep -Eo 'dpl_[A-Za-z0-9]{25}' | head -n 1 || true)
+          if [ -n "$id" ]; then
+            echo "id=$id" >> "$GITHUB_OUTPUT"
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "staged deployment URL: $url"
+
+      - name: Wait for READY and capture the deployment id
+        id: ready
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          DEPLOYMENT_ID: ${{ steps.deploy.outputs.id }}
+          PRODUCTION_SNAPSHOT: ${{ steps.before.outputs.production_snapshot }}
+        run: |
+          set -euo pipefail
+          node --input-type=module -e "
+            const projectId = process.env.VERCEL_PROJECT_ID;
+            const headers = { Authorization: 'Bearer ' + process.env.VERCEL_TOKEN };
+            const deployUrl = process.env.DEPLOY_URL;
+            const snapshot = JSON.parse(process.env.PRODUCTION_SNAPSHOT);
+            const forbiddenAliases = new Set([
+              ...snapshot.productionAliases,
+              'app.zes.codes',
+              'zes-builder.vercel.app',
+              'zes-builder-zescode-2943s-projects.vercel.app',
+              'zes-builder-git-main-zescode-2943s-projects.vercel.app',
+            ]);
+
+            let deploymentId = process.env.DEPLOYMENT_ID || null;
+            const listResponse = await fetch('https://api.vercel.com/v6/deployments?projectId=' + projectId + '&limit=10', { headers });
+            if (!deploymentId && listResponse.ok) {
+              const list = await listResponse.json();
+              const match = (list.deployments ?? []).find((entry) => entry.url && deployUrl.endsWith(entry.url));
+              if (match) {
+                deploymentId = match.id;
+              }
+            }
+            if (!deploymentId) {
+              console.error('the staged deployment could not be resolved to a deployment id');
+              process.exit(1);
+            }
+
+            const deadline = Date.now() + 15 * 60 * 1000;
+            let deployment = null;
+            while (Date.now() < deadline) {
+              const response = await fetch('https://api.vercel.com/v13/deployments/' + deploymentId, { headers });
+              if (response.ok) {
+                deployment = await response.json();
+                if (deployment.readyState === 'READY' || deployment.readyState === 'ERROR') {
+                  break;
+                }
+              }
+              await new Promise((resolve) => setTimeout(resolve, 5000));
+            }
+
+            if (!deployment || deployment.readyState !== 'READY') {
+              console.error('the staged deployment never reached READY: ' + (deployment?.readyState ?? 'unknown'));
+              process.exit(1);
+            }
+
+            const aliases = deployment.alias ?? [];
+            console.log('deployment id: ' + deployment.id);
+            console.log('ready state: ' + deployment.readyState);
+            console.log('substate: ' + (deployment.readySubstate ?? 'none'));
+            console.log('aliases: ' + (aliases.join(',') || 'none'));
+            console.log('target: ' + (deployment.target ?? 'unknown'));
+
+            const captured = aliases.filter((alias) => forbiddenAliases.has(alias));
+            if (captured.length > 0) {
+              console.error('the staged deployment acquired production alias(es): ' + captured.join(','));
+              console.error('no promotion, no alias reassignment and no rollback is attempted by this workflow');
+              process.exit(1);
+            }
+            if (deployment.target !== 'production') {
+              console.error('the staged deployment is not a production-target deployment (target=' + (deployment.target ?? 'none') + ')');
+              console.error('no promotion, no alias reassignment and no rollback is attempted by this workflow');
+              process.exit(1);
+            }
+            if (deployment.readySubstate !== 'STAGED') {
+              console.error('the staged deployment is not in the STAGED substate (readySubstate=' + (deployment.readySubstate ?? 'none') + '); it may already have been promoted');
+              console.error('no promotion, no alias reassignment and no rollback is attempted by this workflow');
+              process.exit(1);
+            }
+
+            const fs = await import('node:fs');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'deployment_id=' + deployment.id + '\n');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'deployment_url=' + deployUrl + '\n');
+          "
+
+      - name: Verify that production was not touched
+        env:
+          DEPLOYMENT_ID: ${{ steps.ready.outputs.deployment_id }}
+          PRODUCTION_SNAPSHOT: ${{ steps.before.outputs.production_snapshot }}
+        run: |
+          set -euo pipefail
+          node --input-type=module -e "
+            const headers = { Authorization: 'Bearer ' + process.env.VERCEL_TOKEN };
+            const snapshot = JSON.parse(process.env.PRODUCTION_SNAPSHOT);
+            const projectId = process.env.VERCEL_PROJECT_ID;
+            const projectUrl = 'https://api.vercel.com/v9/projects/' + projectId;
+            const failures = [];
+
+            async function readJson(response, label) {
+              if (!response.ok) {
+                failures.push(label + ' request failed with HTTP ' + response.status + '; the state cannot be verified');
+                return null;
+              }
+              try {
+                return await response.json();
+              } catch (error) {
+                failures.push(label + ' returned a non-JSON response; the state cannot be verified');
+                return null;
+              }
+            }
+
+            function readDomainNames(payload, label) {
+              if (!Array.isArray(payload.domains)) {
+                failures.push(label + ' did not return a domains array; the domain state cannot be verified');
+                return null;
+              }
+              const names = [];
+              for (const entry of payload.domains) {
+                if (!entry || typeof entry.name !== 'string' || entry.name.length === 0) {
+                  failures.push(label + ' returned a domain entry without a name; the domain state cannot be verified');
+                  return null;
+                }
+                names.push(entry.name);
+              }
+              return names.sort();
+            }
+
+            const project = await readJson(await fetch(projectUrl, { headers }), 'the project configuration');
+            const production = project?.targets?.production ?? {};
+            const aliases = Array.isArray(production.alias) ? production.alias : [];
+
+            if (project) {
+              console.log('production deployment after the staged deployment: ' + (production.id ?? 'none'));
+              console.log('production aliases after the staged deployment (' + aliases.length + '): ' + aliases.join(','));
+              console.log('aliasAssigned after the staged deployment: ' + (production.aliasAssigned ?? 'none'));
+              console.log('autoAssignCustomDomains after the staged deployment: ' + JSON.stringify(project.autoAssignCustomDomains));
+
+              if (production.id !== snapshot.productionId) {
+                failures.push('the current production deployment changed: ' + snapshot.productionId + ' -> ' + (production.id ?? 'none'));
+              }
+
+              const before = [...snapshot.productionAliases].sort();
+              const after = [...aliases].sort();
+              if (before.length !== after.length || before.some((alias, index) => alias !== after[index])) {
+                failures.push('the production alias set changed: [' + before.join(',') + '] -> [' + after.join(',') + ']');
+              }
+              for (const alias of after) {
+                if (!before.includes(alias)) {
+                  failures.push('a new alias was assigned to production: ' + alias);
+                }
+              }
+
+              if ((production.aliasAssigned ?? null) !== snapshot.aliasAssigned) {
+                failures.push('the production aliasAssigned marker changed: ' + snapshot.aliasAssigned + ' -> ' + (production.aliasAssigned ?? 'none'));
+              }
+
+              if (typeof project.autoAssignCustomDomains !== 'boolean') {
+                failures.push('the project autoAssignCustomDomains setting is missing or not a boolean after the staged deployment: ' + JSON.stringify(project.autoAssignCustomDomains));
+              } else if (project.autoAssignCustomDomains !== snapshot.autoAssignCustomDomains) {
+                failures.push('the project autoAssignCustomDomains setting changed: ' + snapshot.autoAssignCustomDomains + ' -> ' + project.autoAssignCustomDomains);
+              }
+            }
+
+            const domainsPayload = await readJson(await fetch(projectUrl + '/domains', { headers }), 'the project domains');
+            const domainNames = domainsPayload === null ? null : readDomainNames(domainsPayload, 'the project domains');
+            if (domainNames !== null) {
+              console.log('project domains after the staged deployment (' + domainNames.length + '): ' + domainNames.join(','));
+              if (JSON.stringify(domainNames) !== JSON.stringify(snapshot.domains)) {
+                failures.push('the project domain list changed: [' + snapshot.domains.join(',') + '] -> [' + domainNames.join(',') + ']');
+              }
+            }
+
+            const deploymentResponse = await fetch('https://api.vercel.com/v13/deployments/' + process.env.DEPLOYMENT_ID, { headers });
+            if (deploymentResponse.ok) {
+              const deployment = await deploymentResponse.json();
+              const stagedAliases = deployment.alias ?? [];
+              console.log('staged deployment aliases (' + stagedAliases.length + '): ' + (stagedAliases.join(',') || 'none'));
+              console.log('staged deployment target: ' + (deployment.target ?? 'none'));
+              console.log('staged deployment substate: ' + (deployment.readySubstate ?? 'none'));
+              const forbidden = new Set([
+                ...snapshot.productionAliases,
+                'app.zes.codes',
+                'zes-builder.vercel.app',
+                'zes-builder-zescode-2943s-projects.vercel.app',
+                'zes-builder-git-main-zescode-2943s-projects.vercel.app',
+              ]);
+              for (const alias of stagedAliases) {
+                if (forbidden.has(alias)) {
+                  failures.push('the staged deployment holds a production alias: ' + alias);
+                }
+              }
+              if (deployment.url && forbidden.has(deployment.url)) {
+                failures.push('the staged deployment URL is a production alias: ' + deployment.url);
+              }
+              if (deployment.target !== 'production') {
+                failures.push('the staged deployment is not a production-target deployment (target=' + (deployment.target ?? 'none') + ')');
+              }
+              if (deployment.readySubstate !== 'STAGED') {
+                failures.push('the staged deployment is not in the STAGED substate (readySubstate=' + (deployment.readySubstate ?? 'none') + '); it may already have been promoted');
+              }
+            } else {
+              failures.push('the staged deployment could not be read back for alias verification (HTTP ' + deploymentResponse.status + ')');
+            }
+
+            if (failures.length > 0) {
+              for (const failure of failures) {
+                console.error('ALIAS SAFETY CHECK FAILED: ' + failure);
+              }
+              console.error('the workflow stops here. No promotion, no alias reassignment and no rollback is attempted automatically.');
+              console.error('the current production deployment is left exactly as it is; manual inspection in the Vercel Dashboard is required.');
+              process.exit(1);
+            }
+
+            console.log('alias safety checks passed: production deployment id, all ' + snapshot.productionAliases.length + ' production aliases, aliasAssigned, autoAssignCustomDomains and the ' + snapshot.domains.length + ' project domains are unchanged');
+          "
+
+      - name: Health and smoke checks against the staged deployment URL
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          set -euo pipefail
+          bypass="${VERCEL_AUTOMATION_BYPASS_SECRET:-}"
+          if [ -z "$bypass" ] && [ -f .env.production.local ]; then
+            bypass=$(grep -E '^VERCEL_AUTOMATION_BYPASS_SECRET=' .env.production.local | head -n 1 | cut -d= -f2- || true)
+          fi
+
+          check() {
+            local path="$1"
+            local expected="$2"
+            local body="/tmp/smoke$(printf '%s' "$path" | tr '/.' '__')"
+            local code
+            code=$(curl -sS -o "$body" -w '%{http_code}' --max-time 30 "$DEPLOY_URL$path" || true)
+            if [ "$code" = "302" ] || [ "$code" = "401" ] || [ "$code" = "403" ]; then
+              if [ -n "$bypass" ]; then
+                code=$(curl -sS -o "$body" -w '%{http_code}' --max-time 30 \
+                  -H "x-vercel-protection-bypass: $bypass" "$DEPLOY_URL$path" || true)
+              else
+                echo "::error::the staged deployment URL is protected by Vercel Deployment Protection and no VERCEL_AUTOMATION_BYPASS_SECRET was found in the production environment; approve C-5b before the first release"
+                exit 1
+              fi
+            fi
+            echo "$path -> $code"
+            if [ "$code" != "$expected" ]; then
+              echo "::error::smoke check failed for $path (expected $expected, got $code)"
+              exit 1
+            fi
+          }
+
+          check / 200
+          check /api/health 200
+          check /api/websites 401
+
+          if ! grep -q '"status":"healthy"' /tmp/smoke_api_health 2>/dev/null; then
+            echo "::error::the health endpoint did not report a healthy status"
+            exit 1
+          fi
+
+          rm -f /tmp/smoke__ /tmp/smoke_api_health /tmp/smoke_api_websites
+
+      - name: Remove the pulled environment file
+        if: always()
+        run: rm -f .env.production.local .env.production
+
+      - name: Staged deployment summary
+        env:
+          DEPLOYMENT_ID: ${{ steps.ready.outputs.deployment_id }}
+          DEPLOYMENT_URL: ${{ steps.ready.outputs.deployment_url }}
+          SHA: ${{ needs.validate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          {
+            echo "STAGED PRODUCTION DEPLOYMENT READY"
+            echo ""
+            echo "Deployment ID: ${DEPLOYMENT_ID}"
+            echo "Deployment URL: ${DEPLOYMENT_URL}"
+            echo "Commit SHA: ${SHA}"
+            echo ""
+            echo "Automated validation: PASSED"
+            echo "Deployment readiness: READY"
+            echo "Health check: PASSED"
+            echo ""
+            echo "Production promotion: NOT PERFORMED"
+            echo ""
+            echo "Next action:"
+            echo "The owner must inspect the staged deployment and manually promote"
+            echo "it through the Vercel Dashboard."
+          } >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "STAGED PRODUCTION DEPLOYMENT READY"
+            echo "Deployment ID: ${DEPLOYMENT_ID}"
+            echo "Deployment URL: ${DEPLOYMENT_URL}"
+            echo "Commit SHA: ${SHA}"
+            echo "Automated validation: PASSED"
+            echo "Deployment readiness: READY"
+            echo "Health check: PASSED"
+            echo "Production promotion: NOT PERFORMED"
+            echo "Next action:"
+            echo "The owner must inspect the staged deployment and manually promote"
+            echo "it through the Vercel Dashboard."
+          } | tee -a "$GITHUB_OUTPUT"
