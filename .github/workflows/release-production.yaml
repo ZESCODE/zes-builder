@@ -437,7 +437,7 @@ jobs:
               const list = await listResponse.json();
               const match = (list.deployments ?? []).find((entry) => entry.url && deployUrl.endsWith(entry.url));
               if (match) {
-                deploymentId = match.id;
+                deploymentId = match.id ?? match.uid;
               }
             }
             if (!deploymentId) {
@@ -464,7 +464,7 @@ jobs:
             }
 
             const aliases = deployment.alias ?? [];
-            console.log('deployment id: ' + deployment.id);
+            console.log('deployment id: ' + (deployment.id ?? deployment.uid));
             console.log('ready state: ' + deployment.readyState);
             console.log('substate: ' + (deployment.readySubstate ?? 'none'));
             console.log('aliases: ' + (aliases.join(',') || 'none'));
@@ -488,7 +488,7 @@ jobs:
             }
 
             const fs = await import('node:fs');
-            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'deployment_id=' + deployment.id + '\n');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'deployment_id=' + (deployment.id ?? deployment.uid) + '\n');
             fs.appendFileSync(process.env.GITHUB_OUTPUT, 'deployment_url=' + deployUrl + '\n');
           "
 
