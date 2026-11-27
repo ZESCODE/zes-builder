@@ -324,6 +324,7 @@ jobs:
 
             let project;
             let domainsPayload;
+            let aliasList;
             try {
               const cacheBuster = '?t=' + Date.now();
               project = await readJson(await fetch(projectUrl + cacheBuster, { headers }), 'the project configuration');
@@ -331,6 +332,61 @@ jobs:
                 await fetch(projectUrl + '/domains' + cacheBuster, { headers }),
                 'the project domains',
               );
+            } catch (error) {
+              console.error('CANNOT VERIFY THE PRODUCTION STATE: ' + error.message);
+              console.error('refusing to continue: the production state must be verified before a staged deployment is created.');
+              process.exit(1);
+            }
+
+            /*
+             * The alias list is the only authoritative source for which
+             * deployment serves which name. The alias array on
+             * project.targets.production and on the deployment itself are
+             * derived views that Vercel leaves stale after a promotion - they
+             * reported no aliases at all right after the production deployment
+             * was remapped, while the names kept serving traffic.
+             */
+            async function readAllAliases() {
+              const collected = new Map();
+              let until = null;
+
+              for (let page = 0; page < 20; page++) {
+                const url = new URL('https://api.vercel.com/v4/aliases');
+                url.searchParams.set('projectId', process.env.VERCEL_PROJECT_ID);
+                url.searchParams.set('limit', '100');
+                url.searchParams.set('t', String(Date.now()));
+
+                if (until !== null) {
+                  url.searchParams.set('until', String(until));
+                }
+
+                const payload = await readJson(await fetch(url, { headers }), 'the project aliases');
+
+                if (!Array.isArray(payload.aliases)) {
+                  throw new Error('the project aliases response does not contain an aliases array');
+                }
+
+                for (const entry of payload.aliases) {
+                  if (!entry || typeof entry.alias !== 'string' || typeof entry.deploymentId !== 'string') {
+                    throw new Error('the project aliases response contains an entry without an alias or deploymentId');
+                  }
+                  collected.set(entry.uid ?? entry.alias, entry);
+                }
+
+                const next = payload.pagination?.next ?? null;
+
+                if (next === null) {
+                  return [...collected.values()];
+                }
+
+                until = next;
+              }
+
+              throw new Error('the project alias list did not terminate after 20 pages');
+            }
+
+            try {
+              aliasList = await readAllAliases();
             } catch (error) {
               console.error('CANNOT VERIFY THE PRODUCTION STATE: ' + error.message);
               console.error('refusing to continue: the production state must be verified before a staged deployment is created.');
@@ -352,14 +408,23 @@ jobs:
             }
 
             const production = project.targets?.production ?? {};
-            const aliases = production.alias ?? [];
+            const aliasAssignments = {};
+            for (const entry of aliasList) {
+              if (entry.deletedAt) {
+                continue;
+              }
+              aliasAssignments[entry.alias] = entry.deploymentId;
+            }
+            const aliases = Object.keys(aliasAssignments)
+              .filter((alias) => aliasAssignments[alias] === production.id)
+              .sort();
 
             if (!production.id) {
               console.error('CANNOT VERIFY THE PRODUCTION STATE: no current production deployment found');
               process.exit(1);
             }
-            if (!Array.isArray(aliases) || aliases.length === 0) {
-              console.error('CANNOT VERIFY THE PRODUCTION STATE: the current production deployment has no recorded aliases; refusing to continue');
+            if (aliases.length === 0) {
+              console.error('CANNOT VERIFY THE PRODUCTION STATE: the current production deployment holds no aliases; refusing to continue');
               process.exit(1);
             }
             if (typeof project.autoAssignCustomDomains !== 'boolean') {
@@ -369,6 +434,7 @@ jobs:
 
             console.log('current production deployment: ' + production.id);
             console.log('current production aliases (' + aliases.length + '): ' + aliases.join(','));
+            console.log('all project aliases (' + Object.keys(aliasAssignments).length + '): ' + Object.keys(aliasAssignments).sort().join(','));
             console.log('current aliasAssigned: ' + (production.aliasAssigned ?? 'none'));
             console.log('autoAssignCustomDomains: ' + project.autoAssignCustomDomains);
             console.log('project domains (' + domainNames.length + '): ' + domainNames.slice().sort().join(','));
@@ -376,6 +442,7 @@ jobs:
             const snapshot = {
               productionId: production.id,
               productionAliases: aliases,
+              aliasAssignments,
               aliasAssigned: production.aliasAssigned ?? null,
               autoAssignCustomDomains: project.autoAssignCustomDomains,
               domains: domainNames.slice().sort(),
@@ -534,16 +601,73 @@ jobs:
               return names.sort();
             }
 
+            async function readAllAliases() {
+              const collected = new Map();
+              let until = null;
+
+              for (let page = 0; page < 20; page++) {
+                const url = new URL('https://api.vercel.com/v4/aliases');
+                url.searchParams.set('projectId', projectId);
+                url.searchParams.set('limit', '100');
+                url.searchParams.set('t', String(Date.now()));
+
+                if (until !== null) {
+                  url.searchParams.set('until', String(until));
+                }
+
+                const payload = await readJson(await fetch(url, { headers }), 'the project aliases');
+
+                if (payload === null) {
+                  return null;
+                }
+                if (!Array.isArray(payload.aliases)) {
+                  failures.push('the project aliases response does not contain an aliases array; the alias state cannot be verified');
+                  return null;
+                }
+
+                for (const entry of payload.aliases) {
+                  if (!entry || typeof entry.alias !== 'string' || typeof entry.deploymentId !== 'string') {
+                    failures.push('the project aliases response contains an entry without an alias or deploymentId; the alias state cannot be verified');
+                    return null;
+                  }
+                  collected.set(entry.uid ?? entry.alias, entry);
+                }
+
+                const next = payload.pagination?.next ?? null;
+
+                if (next === null) {
+                  return [...collected.values()];
+                }
+
+                until = next;
+              }
+
+              failures.push('the project alias list did not terminate after 20 pages; the alias state cannot be verified');
+              return null;
+            }
+
             const project = await readJson(
               await fetch(projectUrl + '?t=' + Date.now(), { headers }),
               'the project configuration',
             );
             const production = project?.targets?.production ?? {};
-            const aliases = Array.isArray(production.alias) ? production.alias : [];
+
+            const aliasList = await readAllAliases();
+            const aliasAssignments = {};
+
+            if (aliasList !== null) {
+              for (const entry of aliasList) {
+                if (entry.deletedAt) {
+                  continue;
+                }
+                aliasAssignments[entry.alias] = entry.deploymentId;
+              }
+            }
 
             if (project) {
               console.log('production deployment after the staged deployment: ' + (production.id ?? 'none'));
-              console.log('production aliases after the staged deployment (' + aliases.length + '): ' + aliases.join(','));
+              console.log('production aliases after the staged deployment (' + snapshot.productionAliases.length + '): ' + snapshot.productionAliases.join(','));
+              console.log('all project aliases after the staged deployment (' + Object.keys(aliasAssignments).length + '): ' + Object.keys(aliasAssignments).sort().join(','));
               console.log('aliasAssigned after the staged deployment: ' + (production.aliasAssigned ?? 'none'));
               console.log('autoAssignCustomDomains after the staged deployment: ' + JSON.stringify(project.autoAssignCustomDomains));
 
@@ -552,13 +676,35 @@ jobs:
               }
 
               const before = [...snapshot.productionAliases].sort();
-              const after = [...aliases].sort();
+              const after = before.filter((alias) => aliasAssignments[alias] === snapshot.productionId);
               if (before.length !== after.length || before.some((alias, index) => alias !== after[index])) {
                 failures.push('the production alias set changed: [' + before.join(',') + '] -> [' + after.join(',') + ']');
               }
-              for (const alias of after) {
-                if (!before.includes(alias)) {
-                  failures.push('a new alias was assigned to production: ' + alias);
+              for (const alias of before) {
+                if (aliasAssignments[alias] !== snapshot.productionId) {
+                  failures.push('the production alias ' + alias + ' no longer points at the production deployment');
+                }
+              }
+
+              if (aliasList !== null) {
+                const beforeAssignments = snapshot.aliasAssignments ?? {};
+                const beforeNames = Object.keys(beforeAssignments).sort();
+                const afterNames = Object.keys(aliasAssignments).sort();
+
+                if (beforeNames.length !== afterNames.length || beforeNames.some((alias, index) => alias !== afterNames[index])) {
+                  failures.push('the project alias list changed: [' + beforeNames.join(',') + '] -> [' + afterNames.join(',') + ']');
+                }
+
+                for (const alias of beforeNames) {
+                  if (aliasAssignments[alias] !== beforeAssignments[alias]) {
+                    failures.push('the alias ' + alias + ' changed deployment: ' + beforeAssignments[alias] + ' -> ' + (aliasAssignments[alias] ?? 'none'));
+                  }
+                }
+
+                for (const [alias, deploymentId] of Object.entries(aliasAssignments)) {
+                  if (deploymentId === process.env.DEPLOYMENT_ID) {
+                    failures.push('the staged deployment holds the project alias ' + alias);
+                  }
                 }
               }
 
@@ -626,7 +772,7 @@ jobs:
               process.exit(1);
             }
 
-            console.log('alias safety checks passed: production deployment id, all ' + snapshot.productionAliases.length + ' production aliases, aliasAssigned, autoAssignCustomDomains and the ' + snapshot.domains.length + ' project domains are unchanged');
+            console.log('alias safety checks passed: production deployment id, all ' + snapshot.productionAliases.length + ' production aliases, the full project alias map (' + Object.keys(snapshot.aliasAssignments ?? {}).length + ' aliases), aliasAssigned, autoAssignCustomDomains and the ' + snapshot.domains.length + ' project domains are unchanged');
           "
 
       - name: Health and smoke checks against the staged deployment URL
