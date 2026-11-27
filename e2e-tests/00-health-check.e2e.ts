@@ -8,7 +8,7 @@ import { test, expect } from './helpers/fixtures';
 test.describe('Health Check', () => {
   test('app loads successfully', async ({ readyPage: page }) => {
     await page.goto('/');
-    await expect(page).toHaveTitle(/Bolt/i);
+    await expect(page).toHaveTitle(/ZESCODE Builder/i);
   });
 
   test('no console errors on load', async ({ readyPage: page }) => {

@@ -12,7 +12,7 @@ test('sends a structured chat message and displays the streamed assistant reply'
   });
   await page.goto('/');
   await page.getByRole('button', { name: 'Agent' }).click();
-  await page.getByText('Discuss', { exact: false }).click();
+  await page.keyboard.press('Escape');
   const input = page.locator('textarea').first();
   await input.fill('Say hello from the test');
   await input.press('Enter');

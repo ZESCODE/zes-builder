@@ -13,7 +13,7 @@ test.describe('Code Generation', () => {
 
     await page.goto('/');
     await page.getByRole('button', { name: 'Agent' }).click();
-    await page.getByText('Discuss', { exact: false }).click();
+    await page.keyboard.press('Escape');
     const input = page.locator('textarea').first();
     await input.fill('Write an addition function');
     await input.press('Enter');
