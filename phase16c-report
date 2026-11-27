@@ -1,0 +1,1085 @@
+# ZES-BUILDER — Phase 1C.6 — Single-Owner Production Deployment Governance
+## Implementation Preparation & Controlled Execution Package
+
+**Repository:** `ZESCODE/zes-builder` (branch `main`, HEAD `05836c9`)
+**Production application:** https://app.zes.codes
+**Current production deployment (must stay serving):** `dpl_H3pDKfX3qPaEFfbgrX9EY3xCHxNT`
+**Previous known-good deployment (must not be used without separate approval):** `dpl_9g36tgNuuvAP6wQfZajw2ucGqShC`
+**Vercel project:** `prj_w2rAtbukOEw7tU35XYWW1KpZgQAa` (`zes-builder`) — team `team_0S47OMuzIm316bIgrSfI6zG0` (`zescode-2943s-projects`, plan **Hobby**)
+**Prepared:** 2026-11-26 — **no external mutation was performed**
+
+### Status matrix
+
+| Classification | Content |
+|---|---|
+| **Prepared locally** | `vercel.json`; `.github/workflows/release-production.yaml`; patch `phase1c6-prep.patch` (540 lines, sha256 `55d022198b8da553`); this report |
+| **Tested locally** | JSON validity; YAML parse; static safety checks; secret scan; `typecheck` **PASS**; `build` (VERCEL=1) **PASS**; frozen-lockfile install **PASS**; Node 26.x availability in `actions/node-versions` **PASS** |
+| **Not implemented** | Everything that touches GitHub, Vercel, Cloudflare, DNS or production. No commit, no push, no deploy, no promotion, no credential created, no setting changed |
+| **Requires owner approval** | C-1 … C-9 (section 13) |
+| **Production state verified unchanged** | section 12 |
+| **Blocking prerequisite discovered** | **P-1: the `main` CI baseline is RED** (section 10.1) — the release workflow's CI gate will correctly refuse every release until it is green |
+
+### Locally modified paths (uncommitted, untracked, nothing else touched)
+
+```
+?? vercel.json
+?? .github/workflows/release-production.yaml
+```
+
+`git status --porcelain` shows exactly these two paths; `app/`, `workers/`, `.github/workflows/preview.yaml`, `wrangler.jsonc` and every other tracked file are unmodified. `git diff` is empty (both files are new).
+
+---
+
+## 1. Executive summary
+
+The governance design has two independent barriers:
+
+1. **Barrier 1 — automatic Git deployment from `main` is removed** by `vercel.json` → `git.deploymentEnabled: {"main": false}`. Documented semantics: *"Specify branches that should not trigger a deployment upon commits. By default, any unspecified branch is set to `true`."* (https://vercel.com/docs/project-configuration/git-configuration). Feature branches and pull requests keep previewing.
+2. **Barrier 2 — deployment creation is separated from production promotion.** The Vercel project setting *Production → Branch Tracking → Auto-assign Custom Production Domains* is turned off, so every production build becomes **Staged** and cannot take `app.zes.codes`. The owner promotes manually in the Vercel Dashboard (documented flow: https://vercel.com/docs/deployments/promoting-a-deployment → "Staging and promoting a production deployment").
+
+The release path between the barriers is a `workflow_dispatch` GitHub Actions workflow with two jobs: **Job A (Validate)** — no production credentials, no environment, verifies owner actor, dispatch ref, full SHA, main ancestry, CI status and runs the repo gates; **Job B (Staged deployment)** — the only job with the `production` Environment and the Vercel credentials, revalidates the SHA, builds with `vercel pull` + `vercel build --prod`, deploys with `vercel deploy --prebuilt --prod`, waits for `READY`, verifies that **production was not touched**, runs health/smoke checks on the staged deployment URL, and prints the mandated summary. **It never promotes** — there is no `vercel promote`, `vercel rollback`, `vercel alias assign` or `vercel redeploy` command anywhere in the file (verified by static scan).
+
+**Single-owner model respected:** no `required_reviewers`, no `prevent_self_review`, no second-approver requirement. The GitHub Environment is a **secrets boundary and deployment-history mechanism only** — it does **not** enforce human approval, and this report does not claim that it does. The explicit `workflow_dispatch` is the release decision; the manual Vercel promotion is the second decision.
+
+### 1.1 Critical prerequisite (P-1) — the CI baseline on `main` is RED
+
+| Run | SHA | Workflow | Conclusion | Failing part |
+|---|---|---|---|---|
+| `45779222454` | `05836c9` | CI/CD (`ci.yaml`) | **failure** | job *Test*: ESLint step — `app/root.tsx:11` `import/order`, `app/routes/api.whop.session.ts:4` `prettier/prettier`; job *Docker Build Validation*: Miniflare `ERR_RUNTIME_FAILURE` — *"No CA certificates were loaded from the system"* |
+| `45779222559` | `05836c9` | Performance Budgets (`performance.yaml`) | **failure** | job *Performance Tests* |
+| `45779222658` | `05836c9` | Preview CMS Worker (`preview.yaml`) | success | — (must stay green) |
+
+Local reproduction on the same commit: typecheck **PASS**, lint **FAIL (the same 2 errors)**, vitest **FAIL (14 tests / 7 files — performance-budget timing plus `StaticComposer`, `useChatHistory`, `performance-monitor`, `marketplace`, `message-parser` perf)**, `VERCEL=1 pnpm run build` **PASS**.
+
+**Consequence:** Job A requires *"the latest CI/CD run for the exact SHA is `success`"*. With the baseline red, **every release is refused** — correct fail-closed behaviour, but the owner must first green the baseline (P-1) or explicitly approve a different gate. P-1 is **not** part of this package's scope and must not be bundled into the governance commit without separate approval.
+
+---
+
+## 2. Owner, permissions and actors (verified, read-only)
+
+| Item | Value | Method |
+|---|---|---|
+| **Repository owner login** | **`ZESCODE`** | `gh repo view ZESCODE/zes-builder --json owner` → `{"owner":"ZESCODE"}` |
+| **Authenticated actor** | `ZESCODE` | `gh api user --jq .login` |
+| **Viewer permission of the actor** | `ADMIN` | `gh repo view … --json viewerPermission` |
+| **Users with write access** | **only `ZESCODE`** (`admin: true, maintain: true, push: true, triage: true, pull: true`) | `gh api repos/ZESCODE/zes-builder/collaborators --paginate` → 1 entry |
+| Other collaborators | none returned by the collaborators API (no outside writers, no bots with push) | same |
+| Production branch | `main` | `GET /v9/projects/{id}` → `link.productionBranch` |
+
+**Owner confirmation requested:** the workflow compares `github.actor` against `github.repository_owner` at runtime (no username is hardcoded). `github.repository_owner` resolves to `ZESCODE` for this repository, which matches the owner login above. No collaborator or permission was changed, and none needs to change.
+
+---
+
+## 3. Deliverable 1 — exact proposed `vercel.json` (repository root)
+
+```json
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": {
+      "main": false
+    }
+  }
+}
+```
+
+| Check | Result |
+|---|---|
+| Path | repository root (`/data/data/com.termux/files/home/tmp/zes-builder/vercel.json`) — prepared locally, uncommitted |
+| JSON validity | **PASS** (`node -e "require('./vercel.json')"` → parsed; `git.deploymentEnabled.main === false` asserted) |
+| Conflict with an existing Vercel configuration | none — no `vercel.json` / `vercel.ts` existed before (`ls` → not found); the Vercel project uses the auto-detected `react-router` framework preset (`framework: "react-router"`, `buildCommand: null`, `outputDirectory: null`), and this file changes no build/output setting |
+| Unintended overwrite | none — the file is new; `.vercel/` (project link) remains git-ignored and is not touched |
+| Unspecified branches | remain `true` → feature-branch and pull-request previews keep working (documented default) |
+| Plan dependency | none — static project configuration, no Pro/Enterprise feature used |
+| `gh-pages` exclusion | **not included** (C-6 is optional and separately approved) |
+
+---
+
+## 4. Deliverable 2 — complete proposed `release-production.yaml`
+
+Prepared locally at `.github/workflows/release-production.yaml` (540-line patch, sha256 `55d022198b8da553`). Full content is reproduced in section 4.1.
+
+### 4.0 Requirement → implementation map
+
+| Required behaviour | Implementation (step name in the file) |
+|---|---|
+| 1. Reject non-owner actors | *Verify the triggering actor is the repository owner* — `github.actor` vs `github.repository_owner`, case-insensitive; repeated in Job B |
+| 2. Reject dispatch from a branch other than `main` | *Verify the dispatch ref is main* — `github.ref_type == "branch"` **and** `github.ref == "refs/heads/main"`; repeated in Job B |
+| 3. Validate the full SHA format | *Validate the supplied commit SHA* — regex `^[0-9a-f]{40}$` |
+| 4. Fetch the required Git history | `actions/checkout@v7` with `ref: <sha>`, `fetch-depth: 0`, `persist-credentials: false`, plus `git fetch --no-tags origin main` |
+| 5. Verify SHA reachable from `origin/main` | *Verify the commit is an ancestor of origin/main* — `git merge-base --is-ancestor` (Job A and Job B) |
+| 6. Verify CI status for that exact SHA | *Verify CI status for the exact commit* — `gh api repos/{repo}/actions/runs?head_sha=$SHA`, filtered to `.github/workflows/ci.yaml`, latest run must be `success` |
+| 7. Check out the exact SHA | `ref:` is the SHA in both jobs (never a moving branch name) |
+| 8. Set up Node/pnpm | `pnpm/action-setup@v4` (9.15.9 = `packageManager` in package.json) + `actions/setup-node@v7`; Job A → Node 22 (matches `ci.yaml`), Job B → Node 26.x (matches the Vercel project `nodeVersion: "26.x"`; Node 26.0–26.13 confirmed present in `actions/node-versions`) |
+| 9. Frozen-lockfile install | `pnpm install --frozen-lockfile` (lockfile verified in sync: `--frozen-lockfile --lockfile-only` exits 0 and leaves `pnpm-lock.yaml` unchanged) |
+| 10. Test / typecheck / lint / build gates | `pnpm run typecheck`, `pnpm run lint`, `pnpm run test`, `VERCEL=1 pnpm run build` in Job A (VERCEL=1 reproduces the Vercel cloud target — `vite.config.ts:226` skips the Cloudflare plugin when `process.env.VERCEL` is set, so the Node server build is produced) |
+| 11. Separate job for production credentials | Job B is the only job with `environment: production` and the only job referencing `secrets.*`; Job A has `permissions: {contents: read, actions: read}` and no environment |
+| 12. Deploy only to the exact project and team | *Verify the exact project and team linkage* — writes `.vercel/project.json` from the two Environment secrets, then re-reads `GET /v9/projects/{id}` and asserts `id`, `account.id` and `link.productionBranch` |
+| 13. Wait for `READY` | *Wait for READY and capture the deployment id* — polls `GET /v13/deployments/{id}` every 5 s for up to 15 min; `ERROR` or timeout = failure |
+| 14. Capture deployment id and URL | id from the CLI output (`dpl_[A-Za-z0-9]{25}`) with a `GET /v6/deployments` match as fallback; URL parsed from the CLI output with the project production alias `https://zes-builder.vercel.app` excluded |
+| 15. Health and smoke checks on the deployment URL | *Health and smoke checks against the staged deployment URL* — `/` → 200, `/api/health` → 200 **and** body contains `"status":"healthy"`, `/api/websites` → 401 (the authenticated-boundary check) |
+| 16. Clear staged summary | *Staged deployment summary* — writes the exact mandated text to `$GITHUB_STEP_SUMMARY` and the job output |
+| Job separation | Job A `validate` (no secrets, no environment) → `needs: validate` → Job B `staged-deployment` (`environment: production`, secrets only here) |
+| Pinned Vercel CLI | `VERCEL_CLI_VERSION: 65.9.0` (the version validated locally), installed with `npm install --global vercel@${VERCEL_CLI_VERSION}` — **not** `vercel@latest` |
+| No automatic promotion | no `vercel promote` / `rollback` / `alias assign` / `redeploy` command exists in the file; the workflow only creates a **Staged** deployment |
+| No alias movement | *Verify that production was not touched* asserts the current production deployment id is unchanged, `app.zes.codes` is still assigned to it, and the staged deployment is **not** the current production deployment; the staged deployment's own alias list must not contain `app.zes.codes` |
+
+
+### 4.1 Complete proposed file (verbatim, as prepared locally)
+
+```yaml
+name: Production Release
+
+# Single-owner production release pipeline.
+#
+# Barrier 1 (automatic Git deployments from main) lives in vercel.json:
+#   {"git": {"deploymentEnabled": {"main": false}}}
+#
+# Barrier 2 (deployment creation is separated from production promotion) lives in
+# the Vercel project setting "Auto-assign Custom Production Domains = false".
+# Every production build created here is STAGED. This workflow never promotes.
+#
+# The owner is the only operator: there are no required reviewers and no
+# self-review prevention. The explicit `workflow_dispatch` below IS the release
+# decision, and the GitHub Environment is used only as a credentials boundary
+# and as a deployment-history record.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Full 40-character commit SHA to release (must be reachable from main)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+env:
+  VERCEL_CLI_VERSION: 65.9.0
+  PRODUCTION_DOMAIN: app.zes.codes
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job A - Validate. No production credentials, no environment, no deployment.
+  # ---------------------------------------------------------------------------
+  validate:
+    name: Validate release candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.validate-sha.outputs.sha }}
+    steps:
+      - name: Verify the triggering actor is the repository owner
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          if [ "${ACTOR,,}" != "${OWNER,,}" ]; then
+            echo "::error::the release must be initiated by the repository owner (${OWNER}); actor was ${ACTOR}"
+            exit 1
+          fi
+          echo "actor=${ACTOR} repository_owner=${OWNER}"
+
+      - name: Verify the dispatch ref is main
+        env:
+          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+          if [ "$REF_TYPE" != "branch" ]; then
+            echo "::error::the workflow must be dispatched against a branch, got '${REF_TYPE}'"
+            exit 1
+          fi
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::the workflow must be dispatched from main, got '${REF}'"
+            exit 1
+          fi
+          echo "dispatch ref=${REF}"
+
+      - name: Validate the supplied commit SHA
+        id: validate-sha
+        env:
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$INPUT_REF" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::the ref input must be a full 40-character lowercase commit SHA"
+            exit 1
+          fi
+          echo "sha=$INPUT_REF" >> "$GITHUB_OUTPUT"
+          echo "release candidate=$INPUT_REF"
+
+      - name: Checkout the exact commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.validate-sha.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify the commit is an ancestor of origin/main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=50 origin main
+          if ! git merge-base --is-ancestor "${{ steps.validate-sha.outputs.sha }}" origin/main; then
+            echo "::error::the supplied SHA is not reachable from origin/main"
+            exit 1
+          fi
+          echo "the supplied SHA is reachable from origin/main"
+
+      - name: Verify CI status for the exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.validate-sha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          runs=$(gh api "repos/${{ github.repository }}/actions/runs?head_sha=${SHA}&per_page=100" \
+            --jq '[.workflow_runs[] | select(.path == ".github/workflows/ci.yaml")]')
+          count=$(printf '%s' "$runs" | jq 'length')
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no CI/CD workflow run was found for ${SHA}; refusing to release"
+            exit 1
+          fi
+          latest=$(printf '%s' "$runs" | jq -r 'max_by(.created_at) | "\(.conclusion) \(.html_url)"')
+          conclusion=$(printf '%s' "$runs" | jq -r 'max_by(.created_at) | .conclusion')
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::the latest CI/CD run for ${SHA} is '${conclusion}'; refusing to release"
+            exit 1
+          fi
+          echo "CI/CD run for ${SHA}: ${latest}"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Test
+        run: pnpm run test
+
+      - name: Production build (Node server target, matching the Vercel build)
+        env:
+          VERCEL: '1'
+        run: pnpm run build
+
+      - name: Validation summary
+        run: |
+          echo "validation passed for ${{ steps.validate-sha.outputs.sha }}"
+
+  # ---------------------------------------------------------------------------
+  # Job B - Staged production deployment. Production credentials live here only.
+  # The deployment is created as STAGED. Nothing is promoted.
+  # ---------------------------------------------------------------------------
+  staged-deployment:
+    name: Staged production deployment (no promotion)
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: production
+    permissions:
+      contents: read
+      deployments: write
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - name: Mask the Vercel token
+        run: echo "::add-mask::${VERCEL_TOKEN}"
+
+      - name: Revalidate actor, dispatch ref and commit SHA
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
+          SHA: ${{ needs.validate.outputs.sha }}
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          if [ "${ACTOR,,}" != "${OWNER,,}" ]; then
+            echo "::error::the release must be initiated by the repository owner (${OWNER}); actor was ${ACTOR}"
+            exit 1
+          fi
+          if [ "$REF_TYPE" != "branch" ] || [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::the workflow must be dispatched from main, got '${REF}'"
+            exit 1
+          fi
+          if ! printf '%s' "$INPUT_REF" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::the ref input must be a full 40-character lowercase commit SHA"
+            exit 1
+          fi
+          if [ "$INPUT_REF" != "$SHA" ]; then
+            echo "::error::the validated SHA and the dispatched SHA do not match"
+            exit 1
+          fi
+          echo "revalidated actor=${ACTOR} ref=${REF} sha=${SHA}"
+
+      - name: Checkout the exact commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify the commit is still an ancestor of origin/main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=50 origin main
+          if ! git merge-base --is-ancestor "${{ needs.validate.outputs.sha }}" origin/main; then
+            echo "::error::the supplied SHA is not reachable from origin/main"
+            exit 1
+          fi
+          echo "the supplied SHA is reachable from origin/main"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install the pinned Vercel CLI
+        run: npm install --global "vercel@${VERCEL_CLI_VERSION}"
+
+      - name: Verify the CLI version and the token
+        run: |
+          set -euo pipefail
+          vercel --version
+          vercel whoami --token "$VERCEL_TOKEN"
+
+      - name: Verify the exact project and team linkage
+        run: |
+          set -euo pipefail
+          mkdir -p .vercel
+          printf '{"projectId":"%s","orgId":"%s"}\n' "$VERCEL_PROJECT_ID" "$VERCEL_ORG_ID" > .vercel/project.json
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs';
+            const link = JSON.parse(readFileSync('.vercel/project.json', 'utf8'));
+            if (link.projectId !== process.env.VERCEL_PROJECT_ID) {
+              console.error('project link mismatch');
+              process.exit(1);
+            }
+            if (link.orgId !== process.env.VERCEL_ORG_ID) {
+              console.error('team link mismatch');
+              process.exit(1);
+            }
+            console.log('project link: ' + link.projectId + ' / team ' + link.orgId);
+          "
+          node --input-type=module -e "
+            const response = await fetch('https://api.vercel.com/v9/projects/' + process.env.VERCEL_PROJECT_ID, {
+              headers: { Authorization: 'Bearer ' + process.env.VERCEL_TOKEN },
+            });
+            if (!response.ok) {
+              console.error('the token cannot read the project');
+              process.exit(1);
+            }
+            const project = await response.json();
+            if (project.id !== process.env.VERCEL_PROJECT_ID) {
+              console.error('project id mismatch');
+              process.exit(1);
+            }
+            if (project.account?.id !== process.env.VERCEL_ORG_ID) {
+              console.error('team mismatch: ' + project.account?.id);
+              process.exit(1);
+            }
+            if (project.link?.productionBranch !== 'main') {
+              console.error('unexpected production branch: ' + project.link?.productionBranch);
+              process.exit(1);
+            }
+            console.log('verified project ' + project.id + ' (' + project.name + ') in team ' + project.account.id);
+          "
+
+      - name: Pull production project settings and environment
+        run: vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
+
+      - name: Build the production artifact
+        run: vercel build --prod --token "$VERCEL_TOKEN"
+
+      - name: Record the production state before the deployment
+        id: before
+        run: |
+          set -euo pipefail
+          node --input-type=module -e "
+            const response = await fetch('https://api.vercel.com/v9/projects/' + process.env.VERCEL_PROJECT_ID, {
+              headers: { Authorization: 'Bearer ' + process.env.VERCEL_TOKEN },
+            });
+            const project = await response.json();
+            const production = project.targets?.production ?? {};
+            const aliases = (production.alias ?? []).join(',');
+            console.log('current production deployment: ' + production.id);
+            console.log('current production aliases: ' + aliases);
+            console.log('autoAssignCustomDomains: ' + project.autoAssignCustomDomains);
+            if (!production.id) {
+              console.error('no current production deployment found');
+              process.exit(1);
+            }
+            const fs = await import('node:fs');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'production_id=' + production.id + '\n');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'production_aliases=' + aliases + '\n');
+          "
+
+      - name: Create the staged production deployment
+        id: deploy
+        run: |
+          set -euo pipefail
+          output=$(vercel deploy --prebuilt --prod --yes --token "$VERCEL_TOKEN" 2>&1) || {
+            printf '%s\n' "$output"
+            exit 1
+          }
+          printf '%s\n' "$output"
+          url=$(printf '%s' "$output" \
+            | grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' \
+            | grep -vx 'https://zes-builder.vercel.app' \
+            | head -n 1 || true)
+          if [ -z "$url" ]; then
+            echo "::error::the staged deployment URL could not be parsed from the CLI output"
+            exit 1
+          fi
+          id=$(printf '%s' "$output" | grep -Eo 'dpl_[A-Za-z0-9]{25}' | head -n 1 || true)
+          if [ -n "$id" ]; then
+            echo "id=$id" >> "$GITHUB_OUTPUT"
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "staged deployment URL: $url"
+
+      - name: Wait for READY and capture the deployment id
+        id: ready
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          DEPLOYMENT_ID: ${{ steps.deploy.outputs.id }}
+        run: |
+          set -euo pipefail
+          node --input-type=module -e "
+            const projectId = process.env.VERCEL_PROJECT_ID;
+            const headers = { Authorization: 'Bearer ' + process.env.VERCEL_TOKEN };
+            const deployUrl = process.env.DEPLOY_URL;
+
+            let deploymentId = process.env.DEPLOYMENT_ID || null;
+            const listResponse = await fetch('https://api.vercel.com/v6/deployments?projectId=' + projectId + '&limit=10', { headers });
+            if (!deploymentId && listResponse.ok) {
+              const list = await listResponse.json();
+              const match = (list.deployments ?? []).find((entry) => entry.url && deployUrl.endsWith(entry.url));
+              if (match) {
+                deploymentId = match.id;
+              }
+            }
+            if (!deploymentId) {
+              console.error('the staged deployment could not be resolved to a deployment id');
+              process.exit(1);
+            }
+
+            const deadline = Date.now() + 15 * 60 * 1000;
+            let deployment = null;
+            while (Date.now() < deadline) {
+              const response = await fetch('https://api.vercel.com/v13/deployments/' + deploymentId, { headers });
+              if (response.ok) {
+                deployment = await response.json();
+                if (deployment.readyState === 'READY' || deployment.readyState === 'ERROR') {
+                  break;
+                }
+              }
+              await new Promise((resolve) => setTimeout(resolve, 5000));
+            }
+
+            if (!deployment || deployment.readyState !== 'READY') {
+              console.error('the staged deployment never reached READY: ' + (deployment?.readyState ?? 'unknown'));
+              process.exit(1);
+            }
+
+            const aliases = deployment.alias ?? [];
+            console.log('deployment id: ' + deployment.id);
+            console.log('ready state: ' + deployment.readyState);
+            console.log('aliases: ' + (aliases.join(',') || 'none'));
+            console.log('target: ' + (deployment.target ?? 'unknown'));
+
+            if (aliases.includes(process.env.PRODUCTION_DOMAIN)) {
+              console.error('the staged deployment already holds ' + process.env.PRODUCTION_DOMAIN + '; stopping');
+              process.exit(1);
+            }
+
+            const fs = await import('node:fs');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'deployment_id=' + deployment.id + '\n');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'deployment_url=' + deployUrl + '\n');
+          "
+
+      - name: Verify that production was not touched
+        env:
+          DEPLOYMENT_ID: ${{ steps.ready.outputs.deployment_id }}
+          PRODUCTION_ID_BEFORE: ${{ steps.before.outputs.production_id }}
+        run: |
+          set -euo pipefail
+          node --input-type=module -e "
+            const headers = { Authorization: 'Bearer ' + process.env.VERCEL_TOKEN };
+            const response = await fetch('https://api.vercel.com/v9/projects/' + process.env.VERCEL_PROJECT_ID, { headers });
+            const project = await response.json();
+            const production = project.targets?.production ?? {};
+            const aliases = production.alias ?? [];
+            console.log('production deployment after the staged deployment: ' + production.id);
+            console.log('production aliases after the staged deployment: ' + aliases.join(','));
+            if (production.id !== process.env.PRODUCTION_ID_BEFORE) {
+              console.error('the current production deployment changed: ' + process.env.PRODUCTION_ID_BEFORE + ' -> ' + production.id);
+              process.exit(1);
+            }
+            if (!aliases.includes(process.env.PRODUCTION_DOMAIN)) {
+              console.error(process.env.PRODUCTION_DOMAIN + ' is no longer assigned to the current production deployment');
+              process.exit(1);
+            }
+            if ((production.alias ?? []).includes(process.env.DEPLOYMENT_ID)) {
+              console.error('the staged deployment became the current production deployment');
+              process.exit(1);
+            }
+          "
+
+      - name: Health and smoke checks against the staged deployment URL
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          set -euo pipefail
+          bypass="${VERCEL_AUTOMATION_BYPASS_SECRET:-}"
+          if [ -z "$bypass" ] && [ -f .env.production.local ]; then
+            bypass=$(grep -E '^VERCEL_AUTOMATION_BYPASS_SECRET=' .env.production.local | head -n 1 | cut -d= -f2- || true)
+          fi
+
+          check() {
+            local path="$1"
+            local expected="$2"
+            local body="/tmp/smoke$(printf '%s' "$path" | tr '/.' '__')"
+            local code
+            code=$(curl -sS -o "$body" -w '%{http_code}' --max-time 30 "$DEPLOY_URL$path" || true)
+            if [ "$code" = "302" ] || [ "$code" = "401" ] || [ "$code" = "403" ]; then
+              if [ -n "$bypass" ]; then
+                code=$(curl -sS -o "$body" -w '%{http_code}' --max-time 30 \
+                  -H "x-vercel-protection-bypass: $bypass" "$DEPLOY_URL$path" || true)
+              else
+                echo "::error::the staged deployment URL is protected by Vercel Deployment Protection and no VERCEL_AUTOMATION_BYPASS_SECRET was found in the production environment; approve C-5b before the first release"
+                exit 1
+              fi
+            fi
+            echo "$path -> $code"
+            if [ "$code" != "$expected" ]; then
+              echo "::error::smoke check failed for $path (expected $expected, got $code)"
+              exit 1
+            fi
+          }
+
+          check / 200
+          check /api/health 200
+          check /api/websites 401
+
+          if ! grep -q '"status":"healthy"' /tmp/smoke_api_health 2>/dev/null; then
+            echo "::error::the health endpoint did not report a healthy status"
+            exit 1
+          fi
+
+          rm -f /tmp/smoke__ /tmp/smoke_api_health /tmp/smoke_api_websites
+
+      - name: Remove the pulled environment file
+        if: always()
+        run: rm -f .env.production.local .env.production
+
+      - name: Staged deployment summary
+        env:
+          DEPLOYMENT_ID: ${{ steps.ready.outputs.deployment_id }}
+          DEPLOYMENT_URL: ${{ steps.ready.outputs.deployment_url }}
+          SHA: ${{ needs.validate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          {
+            echo "STAGED PRODUCTION DEPLOYMENT READY"
+            echo ""
+            echo "Deployment ID: ${DEPLOYMENT_ID}"
+            echo "Deployment URL: ${DEPLOYMENT_URL}"
+            echo "Commit SHA: ${SHA}"
+            echo ""
+            echo "Automated validation: PASSED"
+            echo "Deployment readiness: READY"
+            echo "Health check: PASSED"
+            echo ""
+            echo "Production promotion: NOT PERFORMED"
+            echo ""
+            echo "Next action:"
+            echo "The owner must inspect the staged deployment and manually promote"
+            echo "it through the Vercel Dashboard."
+          } >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "STAGED PRODUCTION DEPLOYMENT READY"
+            echo "Deployment ID: ${DEPLOYMENT_ID}"
+            echo "Deployment URL: ${DEPLOYMENT_URL}"
+            echo "Commit SHA: ${SHA}"
+            echo "Automated validation: PASSED"
+            echo "Deployment readiness: READY"
+            echo "Health check: PASSED"
+            echo "Production promotion: NOT PERFORMED"
+            echo "Next action:"
+            echo "The owner must inspect the staged deployment and manually promote"
+            echo "it through the Vercel Dashboard."
+          } | tee -a "$GITHUB_OUTPUT"
+```
+
+---
+
+## 5. Deliverable 3 — GitHub `production` Environment specification
+
+**Purpose: credentials boundary + deployment history. NOT an approval gate.** No `required_reviewers`, no `prevent_self_review`, no second-approver requirement (single-owner model).
+
+| Field | Value | Rationale |
+|---|---|---|
+| Environment name | `production` | distinct from the existing `preview` Environment, which stays untouched |
+| Required reviewers | **none** | single owner; the owner must be able to release unattended |
+| Prevent self-review | **off / not set** | same reason |
+| Deployment branch policy | `protected_branches: false`, `custom_branch_policies: true`, one custom policy: name `main`, type `branch` | **How GitHub evaluates the dispatch ref:** the Environment policy is evaluated against the **workflow run's ref** (`github.ref`), *not* against the checked-out commit. Because the workflow hard-requires `github.ref == "refs/heads/main"` and requires the supplied SHA to be an ancestor of `origin/main`, a `main` dispatch always satisfies the policy. *This is the documented behaviour of Environment deployment branch policies and is to be confirmed empirically at the first dispatch — if the policy were evaluated against the checked-out SHA instead, Job B would be blocked at environment gating and the run would fail before any Vercel call. That failure mode is safe (fail-closed) and is the intended verification point.* |
+| Environment secrets | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` (+ optional `VERCEL_AUTOMATION_BYPASS_SECRET`, see 6.2) | production credentials exist **only** in the Environment, never at repository level |
+| Repository-level secrets | **unchanged** (currently empty) | no credential is widened in scope |
+| Existing `preview` Environment | **unchanged** (4 Cloudflare secrets, 3 variables) | preview CMS Worker CI must not be disturbed |
+| Deployment records | enabled (`deployments: write` in Job B) | auditable release history per release |
+
+---
+
+## 6. Deliverable 4 — Vercel credential permission and scope specification
+
+### 6.1 `VERCEL_TOKEN`
+
+| Property | Specification |
+|---|---|
+| Scope | **Project-scoped** to `zes-builder` (`prj_w2rAtbukOEw7tU35XYWW1KpZgQAa`) inside team `team_0S47OMuzIm316bIgrSfI6zG0` |
+| Why project-scoped | Vercel docs: *"A project-scoped token denies any request to another project, to a user-level resource, or to a team-level resource."* A leaked token can then neither touch another project nor the rest of the team |
+| Required capabilities | read project settings + environment variables (incl. encrypted values, needed by `vercel pull --environment=production`), create a deployment, read deployment state |
+| Creation path | **Dashboard (recommended, one step):** Account Tokens → Scope → team `zescode-2943s-projects` → project `zes-builder` → expiry → Create. **CLI alternative:** `vercel tokens create zes-builder-production-release --project prj_w2rAtbukOEw7tU35XYWW1KpZgQAa --token "$TEAM_SCOPED_TOKEN"` — note the documented rule: *"To create a project-scoped token, pass a team-scoped token … A full-account token doesn't work with `--project`"*, and *"A team-scoped token can create only project-scoped tokens for projects in its team."* The credential currently held in `~/.secure-credentials/master.env` is the full-account token `zes-vercel` (id `d2ZFJ07MHJHodleQQBDehK238TPRIssEY5auxhfRKij4qtzt`, never expires, scope field not returned by `GET /v6/user/tokens`), so the CLI path needs an intermediate team-scoped token — the Dashboard path avoids creating an extra long-lived credential |
+| Expiry | ≤ 90 days, with a rotation reminder (the account token currently never expires) |
+| Storage | GitHub **Environment** secret `VERCEL_TOKEN` only. The value is masked in the workflow (`::add-mask::`) and never printed, never written to a repo file, never included in an artifact. `vercel pull` materialises decrypted env values into `.env.production.local` **on the ephemeral runner only**; the workflow deletes it in an `if: always()` step and uploads no artifacts |
+| Verification after creation (read-only) | `GET /v9/projects/{id}` → 200 and `id`/`account.id` match; `GET /v9/projects/{id}/env?decrypt=true` → 200 **printing key names only, never values** (this proves `vercel pull` can decrypt production env vars); `GET /v13/projects` (list all) → **403** expected for a project-scoped token (proves the scope boundary); `GET /v5/user/tokens/current` → token metadata (`activeAt` proves usage) |
+| Revocation | `vercel tokens rm <id>` or delete in Account Tokens — immediate. GitHub secret can be deleted independently |
+
+### 6.2 `VERCEL_AUTOMATION_BYPASS_SECRET` (optional but recommended)
+
+Measured facts: the per-deployment alias `https://zes-builder-git-main-zescode-2943s-projects.vercel.app/api/health` answers **302** (Vercel SSO protection, `ssoProtection.deploymentType = all_except_custom_domains`), while `https://zes-builder.vercel.app/api/health` and `https://app.zes.codes/api/health` answer **200**. Therefore a **staged** deployment URL is protected and the workflow's HTTP health check needs a protection bypass.
+
+- Source of the value: Vercel Dashboard → project → Deployment Protection → *Protection Bypass for Automation* (generated once), stored as GitHub Environment secret `VERCEL_AUTOMATION_BYPASS_SECRET` (the workflow prefers this secret and falls back to the pulled `.env.production.local`).
+- Used only as the `x-vercel-protection-bypass` header for the health checks on the staged deployment URL.
+- **No production environment variable is added** (the alternative — adding `VERCEL_AUTOMATION_BYPASS_SECRET` to the production environment — would change production env vars and is therefore *not* recommended here).
+- If the owner declines it, the workflow **fails closed** with an explicit error rather than skipping the health check.
+- CLI equivalent available in 65.9.0: `vercel curl <path> --deployment <url> --protection-bypass <secret>`.
+
+### 6.3 Non-secret Environment values
+
+| Secret | Exact value |
+|---|---|
+| `VERCEL_ORG_ID` | `team_0S47OMuzIm316bIgrSfI6zG0` |
+| `VERCEL_PROJECT_ID` | `prj_w2rAtbukOEw7tU35XYWW1KpZgQAa` |
+
+The Cloudflare preview token (`~/.secure-credentials/cf-preview-ci.token`) is **not** reused here and is not referenced anywhere in the release workflow.
+
+---
+
+## 7. Deliverable 5 — file-by-file implementation diff
+
+Patch file: `~/tmp/zes-builder-report/phase1c6-prep.patch` (540 lines, sha256 `55d022198b8da553`). Regenerate with:
+
+```bash
+cd ~/tmp/zes-builder
+git add -N vercel.json .github/workflows/release-production.yaml
+git diff --no-color > ~/tmp/zes-builder-report/phase1c6-prep.patch
+git reset -q
+```
+
+| # | Path | Change | Lines | Purpose |
+|---|---|---|---|---|
+| 1 | `vercel.json` | **new file** | 8 | Barrier 1 — `git.deploymentEnabled: {"main": false}` |
+| 2 | `.github/workflows/release-production.yaml` | **new file** | 532 | Barrier 2 companion — owner-gated staged production release |
+
+**Nothing else is modified.** Verified: `git status --porcelain` → exactly the two `??` entries above; `git diff` → empty; `app/`, `workers/`, `scripts/`, `package.json`, `pnpm-lock.yaml`, `wrangler.jsonc`, `.github/workflows/preview.yaml`, `.github/workflows/ci.yaml` and all other tracked files are untouched.
+
+**Secret scan of the patch:** no literal credential values — only GitHub secret *references* (`secrets.VERCEL_TOKEN`, `secrets.VERCEL_ORG_ID`, `secrets.VERCEL_PROJECT_ID`, `secrets.VERCEL_AUTOMATION_BYPASS_SECRET`). The only identifiers are the non-secret project/team ids, which are already public in the Vercel API responses.
+
+**Exact commit command set (NOT executed — requires approval):**
+
+```bash
+cd ~/tmp/zes-builder
+git add vercel.json                                   # C-2 stage only
+git commit -m "chore(vercel): disable automatic deployments from main"
+git push origin main
+```
+
+```bash
+cd ~/tmp/zes-builder
+git add .github/workflows/release-production.yaml     # C-4 stage only
+git commit -m "ci(release): add owner-gated staged production release workflow"
+git push origin main
+```
+
+---
+
+## 8. Deliverable 6 — workflow security review
+
+### 8.1 Threat model and controls
+
+| Threat | Control in the workflow | Residual risk |
+|---|---|---|
+| A non-owner triggers a production build | actor must equal `github.repository_owner` (`ZESCODE`); the repository has exactly one account with write access | a compromised owner account is gameable — inherent to any single-owner model |
+| Release from a non-`main` branch | `github.ref_type == "branch"` **and** `github.ref == "refs/heads/main"` | none for the dispatch path |
+| Release of an unreviewed/foreign commit | full-SHA format check + `git merge-base --is-ancestor <sha> origin/main` + CI status must be `success` for that SHA | a green CI on a bad commit still releases — mitigated by the manual promotion step |
+| Moving-branch race (SHA changes after dispatch) | the SHA is the unit of release; the checkout uses the SHA; ancestry is re-verified in Job B | none |
+| Production secrets exposed to validation or PR workflows | Job A has **no** `environment:` and **no** `secrets.*`; the `production` Environment is attached only to Job B; `GITHUB_TOKEN` permissions are minimal (`contents: read`, `actions: read` in A; `contents: read`, `deployments: write` in B); `persist-credentials: false` on both checkouts | none identified |
+| Deployment to the wrong project/team | `.vercel/project.json` is written from the Environment secrets and then re-asserted against `GET /v9/projects/{id}` (`id`, `account.id`, `productionBranch`) — a mismatch aborts before any deploy | none identified |
+| Token leakage in logs | `::add-mask::` on the token; no `echo $VERCEL_TOKEN`; no `set -x`; the pulled `.env.production.local` is deleted in an `if: always()` step; no artifact upload | a Vercel CLI error line could echo a header — the CLI redacts `Authorization`; verify on the first dry run |
+| Accidental promotion inside CI | the file contains **no** promotion command (static scan: `vercel promote|rollback|rolling-release|alias|remove|redeploy` → none); the only `vercel` mutating call is `vercel deploy --prebuilt --prod` | none identified |
+| Accidental alias movement by the workflow | after the deploy, the workflow asserts the current production deployment id is unchanged, `app.zes.codes` is still assigned to it, the staged deployment is not the current production deployment, and the staged deployment's alias list does not contain `app.zes.codes` | the generated alias `zes-builder.vercel.app` may still move (see 9.3) |
+| Supply-chain risk of the build tooling | actions pinned to the majors already used in the repository (`actions/checkout@v7`, `actions/setup-node@v7`, `pnpm/action-setup@v4`); Vercel CLI pinned to `65.9.0`; `npm install --global vercel@65.9.0` (no `@latest`) | action tags are mutable majors — SHA-pinning is optional hardening, not enabled to stay consistent with the repository |
+| DoS via repeated dispatches | `concurrency: {group: production-release, cancel-in-progress: false}` → at most one release at a time | a queued run can still be dispatched repeatedly by the owner |
+| Secret exfiltration via a compromised dependency in the build | `pnpm install --frozen-lockfile` pins the dependency graph | the release build runs untrusted repo code on the runner — inherent |
+| Workflow file itself tampered with | the workflow is committed and reviewed like any other code; `git.deploymentEnabled` blocks the *automatic* path even if a tampered workflow pushed | an attacker who can push to `main` can also edit the workflow — Barrier 2 still requires a Vercel Dashboard promotion |
+
+### 8.2 Findings
+
+- **S-01 — `requireAuth` is a no-op in `withSecurity`.** `app/lib/security.ts:315-452` accepts `requireAuth` in its options type but never evaluates it. Any future hardening that passes `requireAuth: true` would silently do nothing. (Relevant to C-8.)
+- **S-02 — rate limiting depends on a trusted client IP.** `checkRateLimit` returns `unavailable` without a trusted IP (`app/lib/security.ts:96-121`, `app/lib/security.ts:358-366`) and the wrapper then answers **503**. On Vercel, `context.clientAddress` availability must be verified before wrapping routes with `withSecurity({rateLimit:true})`, otherwise the feature breaks in production.
+- **S-03 — Environment secrets are not masked by default.** `VERCEL_AUTOMATION_BYPASS_SECRET` is consumed in a shell variable; the workflow masks only `VERCEL_TOKEN`. The bypass value is never printed, but adding `::add-mask::` for it is a one-line hardening.
+- **S-04 — the release workflow cannot self-test on a non-production project.** Job B is hard-bound to `prj_w2rAtbukOEw7tU35XYWW1KpZgQAa`; the "no promotion" behaviour is therefore validated by static analysis + the first real staged release, not by a throwaway project.
+
+---
+
+## 9. Deliverable 7 — alias-protection verification plan (C-1 checkpoint)
+
+### 9.1 Pre-change snapshot (read-only, run immediately before the toggle)
+
+```bash
+# project state: production id, aliases, autoAssignCustomDomains, environments
+node -e '
+const fs=require("fs");
+const token=/VERCEL_API_KEY=(.*)/.exec(fs.readFileSync(process.env.HOME+"/.secure-credentials/master.env","utf8"))[1].trim();
+fetch("https://api.vercel.com/v9/projects/prj_w2rAtbukOEw7tU35XYWW1KpZgQAa",{headers:{Authorization:"Bearer "+token}})
+ .then(r=>r.json()).then(j=>{
+   console.log("production id :",j.targets.production.id);
+   console.log("aliases       :",(j.targets.production.alias||[]).join(","));
+   console.log("autoAssign    :",j.autoAssignCustomDomains);
+   console.log("prodBranch    :",j.link.productionBranch);
+ });'
+# live health
+curl -sS -o /dev/null -w 'app.zes.codes/ -> %{http_code}\n' https://app.zes.codes/
+curl -sS https://app.zes.codes/api/health
+```
+
+Expected snapshot: production `dpl_H3pDKfX3qPaEFfbgrX9EY3xCHxNT`; four aliases (`app.zes.codes`, `zes-builder.vercel.app`, `zes-builder-zescode-2943s-projects.vercel.app`, `zes-builder-git-main-zescode-2943s-projects.vercel.app`); `autoAssignCustomDomains=true`; `productionBranch=main`.
+
+### 9.2 The change itself
+
+**Primary (documented UI path):** Vercel Dashboard → project `zes-builder` → **Settings → Environments → Production → Branch Tracking → "Auto-assign Custom Production Domains" → OFF**.
+**API fallback:** `PATCH /v9/projects/{id}` with `{"autoAssignCustomDomains": false}` — the field is present at the project root in `GET /v9/projects/{id}` (`true` today). *Note:* the Production environment is a **system** environment and is not separately addressable — `GET /v9/projects/{id}/environments/production` → **404** — so the Dashboard toggle is the authoritative route; the API form must be confirmed against the Dashboard value immediately after the change.
+
+### 9.3 Post-change verification (stop on any deviation)
+
+| # | Check | Expected | Stop condition |
+|---|---|---|---|
+| 1 | `GET /v9/projects/{id}` → `autoAssignCustomDomains` | `false` | not `false` → stop, revert |
+| 2 | `GET /v9/projects/{id}` → `targets.production.id` | **unchanged** (`dpl_H3pDKfX3…`) | changed → **stop immediately**, investigate, do not continue to the push stage |
+| 3 | `GET /v9/projects/{id}` → `targets.production.alias` | the same four aliases, unchanged | any alias added/removed → **stop immediately** |
+| 4 | `curl https://app.zes.codes/api/health` | 200 `{"status":"healthy"}` | non-200 → **stop**, treat as an incident |
+| 5 | `curl https://app.zes.codes/` | 200 | non-200 → **stop** |
+| 6 | `curl https://zes-builder.vercel.app/api/health` | 200 (still the current build) | non-200 → **stop** |
+| 7 | `GET /v9/projects/{id}` → `link.productionBranch` | `main` | changed → **stop** |
+| 8 | `GET /v6/deployments?projectId=…` | newest deployment still `dpl_H3pDKfX3…` | a new production deployment appeared → **stop** |
+
+**Residual uncertainty, stated explicitly:** the documentation names *custom* production domains. Whether the toggle also withholds the **Vercel-generated** production aliases (`zes-builder.vercel.app`, `zes-builder-zescode-2943s-projects.vercel.app`, `zes-builder-git-main-…`) is **not established**. Measured today: the per-deployment alias `zes-builder-git-main-…vercel.app` answers **302** (SSO) while `zes-builder.vercel.app` answers **200** — i.e. the generated aliases are live production surfaces. Empirical resolution happens at the **first staged release**: the workflow asserts the staged deployment's alias list does not contain `app.zes.codes` and that the current production deployment id is unchanged; the owner must additionally check in the Dashboard whether `zes-builder.vercel.app` moved. If it did move, the staged build is publicly reachable on that alias — acceptable for a build the owner is about to promote, but it means Barrier 2 protects the **custom domain** first and the generated aliases second.
+
+### 9.4 Rollback of C-1
+
+Toggle the same setting back to ON (or `PATCH {"autoAssignCustomDomains": true}`), then re-run 9.3 checks 1–8. The toggle changes no deployment, no alias and no environment variable; the rollback is instantaneous and cannot move traffic by itself.
+
+---
+
+## 10. Deliverable 8 — test plans
+
+### 10.1 Repository validation (executed locally, results in section 11)
+
+| Check | Command | Result |
+|---|---|---|
+| JSON validity | `node -e "require('./vercel.json')"` | **PASS** |
+| `main` disabled | assert `git.deploymentEnabled.main === false` | **PASS** |
+| YAML validity | `js-yaml`/`yaml` parse of the workflow | **PASS** (jobs `validate`, `staged-deployment`; 14 + 19 steps) |
+| Workflow permissions | parse + print | workflow `contents: read`; Job A `contents: read, actions: read`; Job B `contents: read, deployments: write` |
+| Job A secret isolation | scan the file up to `staged-deployment:` for `secrets.` | **no matches — clean** |
+| Promotion-command scan | `grep -E "vercel (promote\|rollback\|rolling-release\|alias\|remove\|redeploy)"` | **no matches** |
+| Secret scan of the patch | literal-credential regex | **no matches** (only `secrets.*` references) |
+| Frozen lockfile | `pnpm install --frozen-lockfile --lockfile-only --ignore-scripts` | **PASS** (exit 0, `pnpm-lock.yaml` unchanged) |
+| Typecheck | `node --max-old-space-size=3072 node_modules/typescript/lib/tsc.js --noEmit -p tsconfig.json` | **PASS** (exit 0) |
+| Lint | `pnpm run lint` | **FAIL — 2 pre-existing errors** (`app/root.tsx:11`, `app/routes/api.whop.session.ts:4`); identical to the GitHub CI failure at the same SHA |
+| Tests | `pnpm run test` | **FAIL — 14 tests / 7 files** (performance-budget timing + `StaticComposer`, `useChatHistory`, `performance-monitor`, `marketplace`, `message-parser` perf) |
+| Production build | `VERCEL=1 pnpm run build` | **PASS** (16.7 s, Node server target — identical target to the Vercel cloud build) |
+| Node 26 availability | `actions/node-versions` manifest | **PASS** (26.0 … 26.13 present) |
+
+> Local-only platform note: `pnpm run typecheck` on Termux fails inside `@typescript/native` (`Unable to resolve @typescript/typescript-android-arm64`) — an Android/arm64 packaging limitation, **not** a type error. The TypeScript 6 JS compiler path above passes with exit 0, and GitHub CI reaches the ESLint step (i.e. its typecheck step passed) on the same commit.
+
+### 10.2 Release workflow validation (static + first-run matrix)
+
+| # | Scenario | How it is proven | Expected outcome |
+|---|---|---|---|
+| 1 | Owner actor accepted | Job A step 1 (`github.actor` vs `github.repository_owner`) | passes for `ZESCODE` |
+| 2 | Non-owner actor rejected | same step; `workflow_dispatch` also requires write access | `::error::` + job fails before any Vercel call |
+| 3 | Dispatch from non-`main` rejected | Job A step 2 | fails before checkout |
+| 4 | Invalid SHA rejected | Job A step 3 (regex `^[0-9a-f]{40}$`) | fails |
+| 5 | SHA not reachable from main rejected | Job A step 5 (`git merge-base --is-ancestor`) | fails |
+| 6 | Failed CI status rejected | Job A step 6 (latest `ci.yaml` run must be `success`) | fails — **today this always fails because of P-1** |
+| 7 | Failed tests block deployment | Job A runs `pnpm run test`; Job B `needs: validate` | Job B never starts |
+| 8 | Deployment job cannot run without successful validation | `needs: validate` | enforced by GitHub |
+| 9 | Deployment URL and ID captured | Job B deploy step + `Wait for READY` step | both in the job output and summary |
+| 10 | Unhealthy staged deployment reported as failure | smoke step (`/`, `/api/health`, `/api/websites` + `"status":"healthy"` body check) | job fails, deployment stays Staged, production untouched |
+| 11 | No promotion command exists | static scan of the file | none |
+| 12 | No production alias movement from workflow execution | *Verify that production was not touched* + the staged deployment's alias assertion | fails loudly if the alias moved |
+
+Scenarios 1–12 are executed by the **first real staged release** (C-9). Nothing is triggered merely to test syntax: `workflow_dispatch` on a **non-existent** SHA fails at step 3 without reaching GitHub/Vercel APIs — this is the safe dry-run for the validation path.
+
+### 10.3 Preview regression validation (C-2 acceptance)
+
+| # | Check | Command / method | Expected |
+|---|---|---|---|
+| 1 | Feature-branch preview still deploys | push a throwaway branch, then `GET /v6/deployments?projectId=…` | a **preview** deployment for that branch appears |
+| 2 | Pull-request preview still deploys | open a PR from the same branch | a preview deployment appears (PR previews use the same mechanism) |
+| 3 | `main` push creates **no** deployment | after pushing `vercel.json` to `main`, list deployments | **no new production deployment**; the newest deployment is still `dpl_H3pDKfX3…` |
+| 4 | The commit that introduced `vercel.json` | inspect the deployment list | Vercel may still build that one commit (it reads the new config on the *next* push); with C-1 active it must be **Staged** and must **not** hold `app.zes.codes` |
+| 5 | Preview CMS Worker workflow unchanged | `git diff --stat` (must be empty for `.github/workflows/preview.yaml`), `gh run list --workflow preview.yaml` | unchanged; last run `45779222658` success |
+| 6 | Preview CMS Worker still deploys with its existing Environment | run `gh workflow run preview.yaml --ref main` **only with approval** — it redeploys the preview Worker (no production impact) | run succeeds; worker `zes-cms-api-preview`, D1 `zes-builder-preview` / `0062fbf8-…` |
+| 7 | Preview isolation guard intact | `node scripts/check-preview-isolation.mjs` | exit 0 |
+| 8 | The five `CMS_*` Vercel variables remain preview-targeted | `GET /v9/projects/{id}/env?decrypt=false` | unchanged (preview only) |
+| 9 | No production CMS Worker / migration 002 | `GET /accounts/{acc}/workers/scripts`, read-only D1 query | 14 workers, no `zes-cms-api`; production D1 has only migration `001` |
+
+---
+
+## 11. Deliverable 9 — exact commands per approved stage
+
+Nothing below has been executed. Each block runs only after the corresponding approval.
+
+### Stage 0 — read-only pre-flight (no approval needed)
+
+```bash
+cd ~/tmp/zes-builder
+gh api user --jq .login
+gh repo view ZESCODE/zes-builder --json owner,viewerPermission --jq '{owner:.owner.login, perm:.viewerPermission}'
+gh api repos/ZESCODE/zes-builder/collaborators --jq '.[] | {login, role:.role_name, push:.permissions.push}'
+git status --porcelain=v1
+git rev-parse HEAD
+```
+
+### Stage 1 — C-1: Vercel automatic domain assignment (approval required)
+
+```bash
+# 1) pre-change snapshot  (section 9.1)
+# 2) change: Dashboard → Settings → Environments → Production → Branch Tracking → OFF
+#    (API fallback)
+curl -sS -X PATCH https://api.vercel.com/v9/projects/prj_w2rAtbukOEw7tU35XYWW1KpZgQAa \
+  -H "Authorization: Bearer $VERCEL_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"autoAssignCustomDomains":false}'
+# 3) post-change verification (section 9.3, checks 1-8)
+```
+
+### Stage 2 — C-2: commit and push `vercel.json` (approval required)
+
+```bash
+cd ~/tmp/zes-builder
+git add vercel.json
+git commit -m "chore(vercel): disable automatic deployments from main"
+git push origin main
+# verification: no new production deployment; preview still works (section 10.3)
+```
+
+### Stage 3 — C-3: create the GitHub `production` Environment (approval required)
+
+```bash
+curl -sS -X PUT https://api.github.com/repos/ZESCODE/zes-builder/environments/production \
+  -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+  -d '{"wait_timer":0,"prevent_self_review":false,"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+curl -sS -X POST https://api.github.com/repos/ZESCODE/zes-builder/environments/production/deployment-branch-policies \
+  -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+  -d '{"name":"main","type":"branch"}'
+gh api repos/ZESCODE/zes-builder/environments/production --jq '{name,protection_rules,deployment_branch_policy}'
+```
+
+### Stage 4 — C-5: Vercel credential (approval required)
+
+```bash
+# create the project-scoped token (Dashboard preferred; see 6.1 for the CLI rule)
+vercel tokens create zes-builder-production-release --project prj_w2rAtbukOEw7tU35XYWW1KpZgQAa --token "$TEAM_SCOPED_TOKEN"
+# store it (Environment secrets only)
+gh secret set VERCEL_TOKEN       --env production --body "<token value>"
+gh secret set VERCEL_ORG_ID      --env production --body "team_0S47OMuzIm316bIgrSfI6zG0"
+gh secret set VERCEL_PROJECT_ID  --env production --body "prj_w2rAtbukOEw7tU35XYWW1KpZgQAa"
+gh secret set VERCEL_AUTOMATION_BYPASS_SECRET --env production --body "<bypass value>"   # optional (6.2)
+gh secret list --env production
+```
+
+### Stage 5 — C-4: commit and push the release workflow (approval required)
+
+```bash
+cd ~/tmp/zes-builder
+git add .github/workflows/release-production.yaml
+git commit -m "ci(release): add owner-gated staged production release workflow"
+git push origin main
+```
+
+### Stage 6 — first staged release (C-9 — **separate explicit approval**, production change)
+
+```bash
+SHA=$(git -C ~/tmp/zes-builder rev-parse HEAD)
+gh workflow run release-production.yaml --ref main -f ref="$SHA"
+gh run list --workflow release-production.yaml --limit 1
+gh run watch <run-id>
+```
+
+### Stage 7 — manual promotion (owner action in the Vercel Dashboard — never scripted)
+
+Vercel → project `zes-builder` → Deployments → the staged deployment → **⋯ → Promote → Promote**. No CLI/API promotion command is used anywhere.
+
+---
+
+## 12. Deliverable 10 — risk register and rollback procedure
+
+| ID | Risk | Likelihood | Impact | Mitigation | Rollback |
+|---|---|---|---|---|---|
+| R-01 | Barrier 2 does not cover the generated `zes-builder.vercel.app` alias | medium | medium — a staged build may be publicly reachable on that alias before promotion | section 9.3 empirical check; the custom domain is protected first | disable the alias? not needed — the owner simply does not promote; document the exposure |
+| R-02 | The commit that adds `vercel.json` still triggers one deployment | high | low — it creates a build, not a release, and with C-1 active it stays Staged | C-1 executed and verified **before** the push; the workflow asserts the alias did not move | delete the staged deployment (`vercel remove`) if needed — owner decision |
+| R-03 | The release workflow fails on the first real run for a benign reason (e.g. `gh api` shape, CLI output format) | medium | low — nothing is promoted; production untouched | every step fails closed before the deploy; the deploy step is last-but-one; the staged deployment can be discarded | fix the workflow, re-dispatch (no production effect) |
+| R-04 | `vercel pull` cannot decrypt production env vars with a project-scoped token | low | medium — the release stops before any deployment | verify after token creation (section 6.1) | use a team-scoped token (broader scope, needs approval) |
+| R-05 | The CI gate blocks every release because the baseline is red (P-1) | **certain today** | low — fail-closed | fix P-1 first; the gate must not be weakened | — |
+| R-06 | CLI-built artifact differs from the Vercel cloud build (env at build time, branch metadata, `VERCEL` flag) | medium | medium — a subtly different artifact is promoted | `VERCEL=1` reproduces the Node target; `vercel pull` provides the same production env vars; the local `VERCEL=1` build passes | instant rollback to `dpl_H3pDKfX3…` |
+| R-07 | Node version mismatch (Job B Node 26.x vs CI Node 22) | low | low | Node 26.x exists in the actions manifest and matches the Vercel project `nodeVersion` | revert to Node 22 in the workflow |
+| R-08 | The bypass secret is absent → health checks cannot run | medium | medium — the release stops after the deployment is created | fail-closed with an explicit error; the staged deployment stays unreleased | discard the staged deployment; add C-5b |
+| R-09 | A leaked project-scoped token is used to create production deployments | low | medium | project scope limits the blast radius to this project; Barrier 2 still requires a Dashboard promotion to move `app.zes.codes` | revoke the token (`vercel tokens rm`), delete the GitHub secret, re-create |
+| R-10 | The owner promotes a staged deployment without inspecting it | low | high | the workflow prints the exact SHA/URL/id; the promotion is a separate manual step | instant rollback to `dpl_H3pDKfX3…` |
+| R-11 | `dpl_9g36tgNuuvAP6wQfZajw2ucGqShC` ages out | certain over time | low | retention is 30 days / 10 deployments → it ages out around 2026-12-23 | re-deploy a known-good commit through the new release path |
+| R-12 | `gh-pages` keeps producing a failing Vercel preview build | certain today | low | C-6 (optional) — not bundled | — |
+
+### 12.1 Rollback ladder
+
+| Situation | Action | Effect on production |
+|---|---|---|
+| C-1 misbehaves | toggle *Auto-assign Custom Production Domains* back ON | none (no deployment/alias is touched by the toggle) |
+| `vercel.json` causes trouble | `git revert <commit>` (or set `deploymentEnabled.main` back to `true`) and push | the automatic path returns; a deployment may occur — plan C-1 first |
+| Workflow misbehaves | `gh workflow disable release-production.yaml` or delete the file | none |
+| Staged deployment is bad | delete/discard it in the Vercel Dashboard (never promoted) | none |
+| Promoted release is bad | **instant rollback** — assign the domains back to `dpl_H3pDKfX3qPaEFfbgrX9EY3xCHxNT` (documented: domain reassignment without a rebuild; `lastRollbackTarget` is currently `null`) | restores the previous build immediately |
+| Emergency release | dispatch the workflow explicitly with the wanted SHA (the release path still works) — never re-enable the automatic path as a shortcut | — |
+| Lockout (broken workflow/secrets) | use the Vercel Dashboard directly to promote an existing deployment | — |
+
+---
+
+## 13. Deliverable 11 — every external mutation that still requires owner approval
+
+| # | Mutation | System | Approval |
+|---|---|---|---|
+| 1 | `autoAssignCustomDomains` → false on the Production environment | Vercel project | **required (C-1)** |
+| 2 | Commit + push `vercel.json` | GitHub | **required (C-2)** |
+| 3 | Create the GitHub `production` Environment + its branch policy | GitHub | **required (C-3)** |
+| 4 | Create the Vercel project-scoped token | Vercel | **required (C-5)** |
+| 5 | Store `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` (+ optional bypass secret) in the Environment | GitHub | **required (C-5)** |
+| 6 | Commit + push `.github/workflows/release-production.yaml` | GitHub | **required (C-4)** |
+| 7 | First real release: workflow dispatch → staged production deployment | Vercel + GitHub | **required separately (C-9)** |
+| 8 | Manual promotion of a staged deployment | Vercel | **required separately (C-9)** |
+| 9 | Any rollback / redeploy / alias move | Vercel | **required separately** |
+| 10 | `gh-pages` exclusion in `vercel.json` | GitHub | optional (C-6) |
+| 11 | Branch protection / ruleset on `main` | GitHub | optional (C-7) |
+| 12 | Changes to `app/routes/api.vercel-deploy.ts` / `api.vercel-user.ts` | GitHub (source) | separate security phase (C-8) |
+| 13 | Fixing the red CI baseline (P-1: 2 lint errors, perf tests, Docker validation CA issue) | GitHub (source) | **separate approval — do not bundle with the governance commits** |
+| 14 | Creating the Vercel *Protection Bypass for Automation* secret | Vercel | optional (C-5b) |
+| 15 | Any production environment variable, DNS, Cloudflare or CMS change | Vercel / Cloudflare | **out of scope — not requested** |
+
+---
+
+## 14. C-8 — separate security review of the in-app Vercel deployment route (no behaviour changed)
+
+**Files inspected:** `app/routes/api.vercel-deploy.ts` (490 lines), `app/routes/api.vercel-user.ts` (160 lines), `app/lib/security.ts` (477 lines), callers `app/components/deploy/VercelDeploy.client.tsx:183`, `app/components/chat/VercelDeploymentLink.client.tsx:107`, `app/lib/services/connectorActivation.ts:71`.
+
+| Finding | Evidence | Assessment |
+|---|---|---|
+| The deploy route is **not** wrapped in `withSecurity` | `app/routes/api.vercel-deploy.ts:176` (loader) and `:243` (action) are exported raw; `api.vercel-user.ts:74` / `:157` *are* wrapped | no rate limit, no origin check, no method whitelist on the deploy route |
+| The Vercel token is **caller-supplied** | loader: `app/routes/api.vercel-deploy.ts:179` (`?token=`), action: `:245` (body `token`) | the route is a proxy that acts with the caller's own credential — no privilege escalation *by itself* |
+| The token travels in the **query string** | `app/routes/api.vercel-deploy.ts:179`; the app's own client does `fetch('/api/vercel-deploy?projectId=…&token=…')` (`app/components/chat/VercelDeploymentLink.client.tsx:107`) | the token lands in server access logs, browser history and `Referer` headers — a real, fixable leak |
+| Deployments are created with **`target: 'production'`** | `app/routes/api.vercel-deploy.ts:384`, POST to `/v13/deployments` at `:419` | for the caller's own project; if a ZES-owned token is ever presented, it can deploy into ZES projects |
+| No server-side Vercel credential is configured today | the project's 15 env vars contain no `VITE_VERCEL_ACCESS_TOKEN`; `api.vercel-user.ts:11-14` would fall back to `context.cloudflare.env` / `process.env` | the route **cannot** currently deploy ZES-owned projects unless the caller supplies a ZES token |
+| `VITE_`-prefixed vars are **inlined into the client bundle** | `vite.config.ts:232-238` (`envPrefix` includes `VITE_`) | a future `VITE_VERCEL_ACCESS_TOKEN` in the Vercel project env would leak the token to the browser — never add one |
+| `withSecurity`'s `requireAuth` is **not implemented** | `app/lib/security.ts:315-452` — the option is accepted but never checked | any hardening that sets `requireAuth: true` would silently do nothing (S-01) |
+| Rate limiting depends on a trusted client IP | `app/lib/security.ts:96-121`, `:358-366` → 503 when unavailable | wrapping the route with `withSecurity({rateLimit:true})` may break it on Vercel unless a trusted IP source is configured (S-02) |
+| Unbounded request payload | the action accepts an arbitrary `files` map (`:245`, `:358-378`) | resource-exhaustion / abuse surface on a public endpoint |
+
+**Proposed remediation (separate phase, not implemented here):** (R-8a) move the token out of the query string — accept it only in the POST body or an `Authorization` header, and drop the GET loader's `token` parameter; (R-8b) wrap both handlers with `withSecurity` **after** confirming a trusted client IP on Vercel; (R-8c) implement `requireAuth` in `withSecurity` or introduce a real credential vault instead of the current no-op; (R-8d) allow-list ZES-owned project ids (e.g. `prj_w2rAtbukOEw7tU35XYWW1KpZgQAa`) and refuse deployments into them from a caller-supplied token; (R-8e) verify the token's account matches the target project's account before deploying; (R-8f) cap the number/size of uploaded files; (R-8g) never name a server-side Vercel credential with a `VITE_` prefix.
+
+---
+
+## 15. C-6 and C-7 — optional, separately approved
+
+- **C-6 `gh-pages` suppression.** The `docs.yaml` workflow pushes to `gh-pages`, which Vercel tries to build as a preview and fails (`dpl_DU1b1KpY…`, ERROR — the docs site is a static MkDocs build, not a React Router app). Excluding `gh-pages` from `git.deploymentEnabled` would stop a recurring failing build. **Not bundled** into the initial governance change; it needs its own approval and its own diff.
+- **C-7 branch protection on `main`.** Recommended as a separate repository-integrity change: require a pull request, require the `CI/CD` checks, block force pushes and branch deletion. A second approval is **not** required (single contributor). Note the limitation: branch protection **cannot** stop the Vercel App from deploying a commit that legitimately reaches `main` — only Barrier 1 does that. A ruleset is not created without approval.
+
+---
+
+## 16. Production integrity — verified unchanged during this phase
+
+| Item | Verified value |
+|---|---|
+| Production deployment | `dpl_H3pDKfX3qPaEFfbgrX9EY3xCHxNT`, READY, `aliasAssigned` unchanged |
+| Production aliases | the same four aliases, unchanged |
+| `app.zes.codes` | `/` → 200, `/api/health` → 200 `{"status":"healthy"}` |
+| `zes-builder.vercel.app/api/health` | 200 |
+| `link.productionBranch` | `main` (unchanged) |
+| Git integration | still connected (`gitCredentialId cred_cad6c97c…`, `deployHooks: []`) — unchanged |
+| `autoAssignCustomDomains` | still `true` (C-1 **not** executed) |
+| `commandForIgnoringBuildStep` | still `null` |
+| `ssoProtection` | still `all_except_custom_domains` |
+| Environments (Vercel) | production / preview / development, 0 custom — unchanged |
+| Environment variables | 15; all five `CMS_*` still preview-targeted; no production CMS variable |
+| GitHub | `main` still unprotected (404), no rulesets, one Environment (`preview`, no reviewers), repository-level secrets/variables still empty, `preview` secrets/variables unchanged |
+| Repository | `git status` → only the two new untracked files; `HEAD = origin/main = 05836c9`; no workflow or source file modified |
+| Cloudflare | 14 workers, `zes-cms-api-preview` present, **no production `zes-cms-api`**; production D1 has only migration `001` and 0 rows; preview D1 has migrations `001`+`002` and 16/0 rows; `zes.codes` DNS unchanged |
+| Preview CMS Worker CI | `preview.yaml` untouched; last run `45779222658` success |
+
+Only read-only endpoints (`GET`), read-only CLI commands and read-only git commands were used. **No deployment, promotion, rollback, setting change, credential creation, commit or push was performed.**
+
+---
+
+## 17. Stop condition
+
+Preparation is complete. The owner now holds a reviewable single-owner governance package:
+
+- `vercel.json` (Barrier 1) — prepared locally, validated, **not committed**
+- `.github/workflows/release-production.yaml` (the gated staged-release path) — prepared locally, YAML-parsed and statically audited, **not committed**
+- `phase1c6-prep.patch` — the exact reviewed diff
+- this report — specifications, review, plans, commands, risks, approvals
+
+**Waiting for the owner's next instruction.** The next approved stage should be **C-1 (Barrier 2)**, because the commit that introduces `vercel.json` can itself still trigger one deployment, and only C-1 keeps that deployment from taking `app.zes.codes`.
+
+**Two decisions are needed from the owner before the first release:**
+1. **P-1** — green the CI baseline (or approve a different CI gate). Until then the release workflow refuses every release by design.
+2. **C-5b** — approve the Vercel *Protection Bypass for Automation* secret so the staged deployment's health checks can run (the workflow fails closed without it).
+
