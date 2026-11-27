@@ -10,7 +10,11 @@ ENV CI=true
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 # Ensure git is available for build and runtime scripts
-RUN apt-get update && apt-get install -y --no-install-recommends git \
+# ca-certificates is required explicitly: the official node:*-bookworm-slim image
+# runs `apt-mark auto '.*'` + `apt-get purge --auto-remove`, which drops the CA
+# bundle. Without it the bundled workerd (Miniflare) fails at startup with
+# "No CA certificates were loaded from the system".
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 # Accept (optional) build-time public URL for Remix/Vite (Coolify can pass it)
@@ -52,8 +56,8 @@ ENV WRANGLER_SEND_METRICS=false \
 # Note: API keys should be provided at runtime via docker run -e or docker-compose
 # Example: docker run -e OPENAI_API_KEY=your_key_here ...
 
-# Install curl for healthchecks
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+# Install curl for healthchecks and restore the CA bundle for the Workers runtime
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 # Pre-configure wrangler to disable metrics

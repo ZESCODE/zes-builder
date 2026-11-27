@@ -1,6 +1,7 @@
 import { useStore } from '@nanostores/react';
 import tailwindReset from '@unocss/reset/tailwind-compat.css?url';
 import xtermStyles from '@xterm/xterm/css/xterm.css?url';
+import reactFlowStyles from '@xyflow/react/dist/style.css?url';
 import { useEffect } from 'react';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
@@ -8,7 +9,6 @@ import { Links, Meta, Outlet, Scripts, ScrollRestoration, type LinksFunction } f
 import { cssTransition, ToastContainer } from 'react-toastify';
 
 import reactToastifyStyles from 'react-toastify/dist/ReactToastify.css?url';
-import reactFlowStyles from '@xyflow/react/dist/style.css?url';
 import { ClientOnly } from 'remix-utils/client-only';
 
 import 'virtual:uno.css';

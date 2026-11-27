@@ -53,19 +53,33 @@ export default defineConfig((config) => {
           manualChunks(id) {
             // Split vendor dependencies for better caching
             if (id.includes('node_modules')) {
-              if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
+              // Resolve the package name from the last `node_modules/` segment.
+              // pnpm paths contain scoped names such as `@radix-ui+react-dialog@1.2.3`,
+              // so a plain `includes('react')` check also captures every Radix package.
+              const pkgPath = id.split('node_modules/').pop() ?? '';
+              const pkg = pkgPath.startsWith('@')
+                ? pkgPath.split('/').slice(0, 2).join('/')
+                : pkgPath.split('/')[0];
+
+              if (
+                pkg === 'react' ||
+                pkg === 'react-dom' ||
+                pkg === 'react-router' ||
+                pkg === 'react-router-dom' ||
+                pkg === 'scheduler'
+              ) {
                 return 'react-vendor';
               }
-              if (id.includes('@ai-sdk') || id.includes('/ai/')) {
+              if (pkg.startsWith('@ai-sdk/') || pkg === 'ai' || pkg.startsWith('@ai/')) {
                 return 'ai-vendor';
               }
-              if (id.includes('@radix-ui') || id.includes('framer-motion')) {
+              if (pkg.startsWith('@radix-ui/') || pkg === 'framer-motion' || pkg === 'motion') {
                 return 'ui-vendor';
               }
-              if (id.includes('@codemirror')) {
+              if (pkg.startsWith('@codemirror/') || pkg === 'codemirror' || pkg.startsWith('@uiw/')) {
                 return 'editor';
               }
-              if (id.includes('@xterm')) {
+              if (pkg.startsWith('@xterm/') || pkg === 'xterm') {
                 return 'terminal';
               }
             }
