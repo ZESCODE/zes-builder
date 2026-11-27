@@ -702,6 +702,7 @@ jobs:
             echo "it through the Vercel Dashboard."
           } >> "$GITHUB_STEP_SUMMARY"
           {
+            echo "release_summary<<RELEASE_SUMMARY_EOF"
             echo "STAGED PRODUCTION DEPLOYMENT READY"
             echo "Deployment ID: ${DEPLOYMENT_ID}"
             echo "Deployment URL: ${DEPLOYMENT_URL}"
@@ -713,4 +714,5 @@ jobs:
             echo "Next action:"
             echo "The owner must inspect the staged deployment and manually promote"
             echo "it through the Vercel Dashboard."
-          } | tee -a "$GITHUB_OUTPUT"
+            echo "RELEASE_SUMMARY_EOF"
+          } >> "$GITHUB_OUTPUT"
