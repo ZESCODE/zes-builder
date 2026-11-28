@@ -13,7 +13,13 @@ const RATE_LIMITS: Record<string, { windowMs: number; maxRequests: number }> = {
   '/api/github-*': { windowMs: 60 * 1000, maxRequests: 30 }, // 30 requests per minute
 
   // Netlify API endpoints
-  '/api/netlify-*': { windowMs: 60 * 1000, maxRequests: 20 }, // 20 requests per minute
+  '/api/netlify-*': { windowMs: 15 * 60 * 1000, maxRequests: 20 }, // 20 requests per 15 minutes
+
+  /*
+   * The Vercel deploy proxy creates real deployments, so it gets its own,
+   * tighter budget instead of the generic fallback below
+   */
+  '/api/vercel-deploy': { windowMs: 60 * 1000, maxRequests: 20 }, // 20 requests per minute
 
   // General API endpoints fallback
   '/api/*': { windowMs: 15 * 60 * 1000, maxRequests: 100 }, // 100 requests per 15 minutes

@@ -635,10 +635,8 @@ async function vercelDeployAction({ request }: { request: Request; context?: any
 
 export const loader = withSecurity(vercelDeployLoader, {
   allowedMethods: ['GET'],
-  rateLimit: false,
 });
 
 export const action = withSecurity(vercelDeployAction, {
   allowedMethods: ['POST'],
-  rateLimit: false,
 });

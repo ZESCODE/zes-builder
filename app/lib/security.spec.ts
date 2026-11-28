@@ -115,6 +115,26 @@ describe('security middleware', () => {
         expect(checkRateLimit(request, '/api/chat')).toEqual({ allowed: false, unavailable: true });
       });
     });
+
+    describe('the deploy proxy', () => {
+      it('uses its own budget instead of the generic fallback', () => {
+        const ip = '198.51.100.42';
+
+        const request = new Request('https://example.com/api/vercel-deploy', {
+          method: 'POST',
+          headers: { 'x-real-ip': ip },
+        });
+
+        // 20 requests per minute for /api/vercel-deploy
+        for (let i = 0; i < 20; i++) {
+          expect(checkRateLimit(request, '/api/vercel-deploy', { clientAddress: ip }).allowed).toBe(true);
+        }
+
+        const blocked = checkRateLimit(request, '/api/vercel-deploy', { clientAddress: ip });
+        expect(blocked.allowed).toBe(false);
+        expect(blocked.unavailable).toBeUndefined();
+      });
+    });
   });
 
   describe('createSecurityHeaders', () => {
