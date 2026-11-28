@@ -1,4 +1,4 @@
-import { getApiKeysFromCookie } from '~/lib/api/cookies';
+import { getApiKeysFromCookie, getCookieValue } from '~/lib/api/cookies';
 import { withSecurity } from '~/lib/security';
 
 interface GitHubBranch {
@@ -55,6 +55,7 @@ async function githubBranchesLoader({ request, context }: { request: Request; co
       githubToken =
         apiKeys.GITHUB_API_KEY ||
         apiKeys.VITE_GITHUB_ACCESS_TOKEN ||
+        getCookieValue(cookieHeader, 'githubToken') ||
         context?.cloudflare?.env?.GITHUB_TOKEN ||
         context?.cloudflare?.env?.VITE_GITHUB_ACCESS_TOKEN ||
         process.env.GITHUB_TOKEN ||

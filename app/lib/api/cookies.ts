@@ -43,6 +43,11 @@ export function getApiKeysFromCookie(cookieHeader: string | null): Record<string
   return safeJsonParse<Record<string, string>>(cookies.apiKeys, {});
 }
 
+export function getCookieValue(cookieHeader: string | null, name: string): string | undefined {
+  const value = parseCookies(cookieHeader)[name];
+  return value ? value : undefined;
+}
+
 export function getProviderSettingsFromCookie(cookieHeader: string | null): Record<string, any> {
   const cookies = parseCookies(cookieHeader);
   return safeJsonParse<Record<string, any>>(cookies.providers, {});
