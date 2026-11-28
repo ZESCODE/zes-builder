@@ -49,7 +49,14 @@ export default function Index() {
           >
             ZES.codes
           </a>{' '}
-          · Built on bolt.diy
+          · Built on bolt.diy ·{' '}
+          <a href="/zap" className="pointer-events-auto hover:text-accent-500">
+            Workflows
+          </a>{' '}
+          ·{' '}
+          <a href="/blog" className="pointer-events-auto hover:text-accent-500">
+            Blog
+          </a>
         </footer>
       </div>
     </AccessGate>

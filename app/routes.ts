@@ -15,6 +15,7 @@ export default [
     ],
   },
   { file: 'routes/git.tsx', path: '/git' },
+  { file: 'routes/blog.ts', path: '/blog' },
   { file: 'routes/zap.tsx', path: '/zap' },
   { file: 'routes/zap.canvas.tsx', path: '/zap/canvas' },
   { file: 'routes/zap.canvas.$workflowId.tsx', path: '/zap/canvas/:workflowId' },
