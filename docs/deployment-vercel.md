@@ -63,3 +63,50 @@ VERCEL=1 pnpm build
 
 This mirrors the Vercel build (no Cloudflare plugin). Without `VERCEL=1` you get
 the Worker build used for `wrangler deploy`.
+
+## Rate limiting store
+
+The limiter keys on the client IP and counts in a store. Two backends exist:
+
+- **memory** (default) — a `Map` inside the serverless instance. The budget is
+  therefore per instance: with `n` instances a client can spend `n` times the
+  documented budget. It is exact on a single instance and good enough for a
+  low traffic deployment.
+- **Vercel KV** — one shared counter for the whole project, so the budget is
+  exact no matter how many instances serve the request. It is selected
+  automatically when `KV_REST_API_URL` and `KV_REST_API_TOKEN` are present in
+  the environment.
+
+To switch to the shared store:
+
+1. In the Vercel dashboard open the project, then **Storage** → **Create
+   Database** → **KV** (Upstash Redis), name it `zes-builder-rate-limit` and
+   link it to the project.
+2. Vercel injects `KV_REST_API_URL` and `KV_REST_API_TOKEN` into the project
+   environment. Confirm with
+   `curl -sS "https://api.vercel.com/v10/projects/<project-id>/env" -H "Authorization: Bearer $TOKEN"`.
+3. Redeploy — the environment is snapshotted at build time.
+
+`RATE_LIMIT_STORE=memory` forces the in-memory backend even when a KV store
+is connected, which is the quick way to roll the shared store back.
+
+If the KV store is unreachable the limiter **fails open**: the request is
+allowed and the failure is logged. The limiter protects capacity, it is not an
+authorisation gate, so a store outage must not turn every route into a 503.
+
+## Promoting a staged deployment
+
+The release workflow never promotes. It creates a STAGED production-target
+deployment and stops. The promotion is a separate, manual and owner-only step:
+
+```bash
+VERCEL_TOKEN=... \
+VERCEL_PROJECT_ID=... \
+VERCEL_TEAM_ID=... \
+  bash scripts/promote-release.sh dpl_XXXXXXXXXXXXXXXXXXXXXXXX
+```
+
+The script refuses to act unless the deployment exists, targets production,
+is still `STAGED` and holds no alias, and it verifies afterwards that the
+production target and every production alias moved to the new deployment and
+that the production domain answers 200. It prints the rollback command.
