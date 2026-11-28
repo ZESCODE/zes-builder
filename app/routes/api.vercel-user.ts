@@ -9,6 +9,7 @@ async function vercelUserLoader({ request, context }: { request: Request; contex
 
     // Try to get Vercel token from various sources
     let vercelToken =
+      apiKeys.VERCEL_ACCESS_TOKEN ||
       apiKeys.VITE_VERCEL_ACCESS_TOKEN ||
       context?.cloudflare?.env?.VERCEL_ACCESS_TOKEN ||
       process.env.VERCEL_ACCESS_TOKEN;
@@ -87,6 +88,7 @@ async function vercelUserAction({ request, context }: { request: Request; contex
 
     // Try to get Vercel token from various sources
     let vercelToken =
+      apiKeys.VERCEL_ACCESS_TOKEN ||
       apiKeys.VITE_VERCEL_ACCESS_TOKEN ||
       context?.cloudflare?.env?.VERCEL_ACCESS_TOKEN ||
       process.env.VERCEL_ACCESS_TOKEN;
