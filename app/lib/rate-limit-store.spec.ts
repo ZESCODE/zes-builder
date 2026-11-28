@@ -131,6 +131,8 @@ describe('rate limit store', () => {
     it('uses the memory store when no KV connection is configured', () => {
       vi.stubEnv('KV_REST_API_URL', '');
       vi.stubEnv('KV_REST_API_TOKEN', '');
+      vi.stubEnv('UPSTASH_REDIS_REST_URL', '');
+      vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', '');
 
       expect(getRateLimitStore().name).toBe('memory');
     });
@@ -138,6 +140,17 @@ describe('rate limit store', () => {
     it('uses the KV store when the connection is configured', () => {
       vi.stubEnv('KV_REST_API_URL', 'https://kv.example.test');
       vi.stubEnv('KV_REST_API_TOKEN', 'secret-token');
+      vi.stubEnv('UPSTASH_REDIS_REST_URL', '');
+      vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', '');
+
+      expect(getRateLimitStore().name).toBe('vercel-kv');
+    });
+
+    it('uses the KV store with the Upstash environment variable names', () => {
+      vi.stubEnv('KV_REST_API_URL', '');
+      vi.stubEnv('KV_REST_API_TOKEN', '');
+      vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://kv.example.test');
+      vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'secret-token');
 
       expect(getRateLimitStore().name).toBe('vercel-kv');
     });
@@ -145,6 +158,8 @@ describe('rate limit store', () => {
     it('can be forced back to the memory store', () => {
       vi.stubEnv('KV_REST_API_URL', 'https://kv.example.test');
       vi.stubEnv('KV_REST_API_TOKEN', 'secret-token');
+      vi.stubEnv('UPSTASH_REDIS_REST_URL', '');
+      vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', '');
       vi.stubEnv('RATE_LIMIT_STORE', 'memory');
 
       expect(getRateLimitStore().name).toBe('memory');

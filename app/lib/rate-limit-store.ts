@@ -134,8 +134,8 @@ export function getRateLimitStore(): RateLimitStore {
     return memoryStore;
   }
 
-  const url = readEnv('KV_REST_API_URL');
-  const token = readEnv('KV_REST_API_TOKEN');
+  const url = readEnv('KV_REST_API_URL') ?? readEnv('UPSTASH_REDIS_REST_URL');
+  const token = readEnv('KV_REST_API_TOKEN') ?? readEnv('UPSTASH_REDIS_REST_TOKEN');
 
   if (url && token) {
     kvStore ??= createKvRateLimitStore({ url, token });
