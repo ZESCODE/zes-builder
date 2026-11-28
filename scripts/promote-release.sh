@@ -36,11 +36,10 @@ for name in VERCEL_TOKEN VERCEL_PROJECT_ID VERCEL_TEAM_ID; do
 done
 
 api() {
-  local path="$1"
+  local url="$1"
   shift
-  curl -sS -H "Authorization: Bearer $VERCEL_TOKEN" -H "Accept: application/json" "$@"
+  curl -sS -H "Authorization: Bearer $VERCEL_TOKEN" -H "Accept: application/json" "$@" "$url"
 }
-
 api_get() {
   local path="$1"
   curl -sS -H "Authorization: Bearer $VERCEL_TOKEN" -H "Accept: application/json" \
@@ -50,6 +49,12 @@ api_get() {
 fail() {
   echo "REFUSING TO CONTINUE: $1" >&2
   exit 1
+}
+
+rollback_hint() {
+  echo ""
+  echo "if the promotion went through but the verification failed, roll back with:"
+  echo "curl -X POST '${VERCEL_API_URL}/v9/projects/${VERCEL_PROJECT_ID}/rollback/${production_id:-<previous-production>}'?teamId=${VERCEL_TEAM_ID}'"
 }
 
 # ---------------------------------------------------------------------------
@@ -136,11 +141,17 @@ echo "production aliases: $(printf '%s' "$production_aliases" | tr '\n' ' ')"
 
 echo "== promoting =="
 
-status=$(api -o /dev/null -w '%{http_code}' -X POST \
+status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
   "${VERCEL_API_URL}/v10/projects/${VERCEL_PROJECT_ID}/promote/${deployment_id}?teamId=${VERCEL_TEAM_ID}" \
-  -H 'Content-Type: application/json' -d '{}')
+  -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{}')
 
-[ "$status" = "201" ] || fail "the promote request answered with HTTP ${status}"
+if [ "$status" != "201" ]; then
+  echo "the promote request answered with HTTP ${status}" >&2
+  rollback_hint
+  exit 1
+fi
 
 echo "the promote request was accepted"
 
@@ -159,7 +170,11 @@ let raw='';process.stdin.on('data',(c)=>{raw+=c}).on('end',()=>{
   process.stdout.write(String(p.targets?.production?.id ?? ''));
 });
 ")
-[ "$new_production" = "$deployment_id" ] || fail "the production target is '${new_production}', expected '${deployment_id}'"
+if [ "$new_production" != "$deployment_id" ]; then
+  echo "the production target is '${new_production}', expected '${deployment_id}'" >&2
+  rollback_hint
+  exit 1
+fi
 
 aliases=$(api_get "/v4/aliases?projectId=${VERCEL_PROJECT_ID}&limit=100&t=$(date +%s%N)")
 missing=""
@@ -174,14 +189,23 @@ let raw='';process.stdin.on('data',(c)=>{raw+=c}).on('end',()=>{
   [ "$owner" = "$deployment_id" ] || missing="${missing} ${alias}"
 done
 
-[ -z "$missing" ] || fail "these production aliases do not serve the new deployment:${missing}"
+if [ -n "$missing" ]; then
+  echo "these production aliases do not serve the new deployment:${missing}" >&2
+  rollback_hint
+  exit 1
+fi
 
 status=$(curl -sS -o /dev/null -w '%{http_code}' "https://${PRODUCTION_DOMAIN}/")
-[ "$status" = "200" ] || fail "https://${PRODUCTION_DOMAIN}/ answered with HTTP ${status}"
+
+if [ "$status" != "200" ]; then
+  echo "https://${PRODUCTION_DOMAIN}/ answered with HTTP ${status}" >&2
+  rollback_hint
+  exit 1
+fi
 
 echo "production deployment: ${new_production}"
 echo "production aliases moved: $(printf '%s' "$production_aliases" | tr '\n' ' ')"
 echo "https://${PRODUCTION_DOMAIN}/ -> HTTP ${status}"
 echo ""
 echo "promotion complete"
-echo "rollback: curl -X POST '${VERCEL_API_URL}/v9/projects/${VERCEL_PROJECT_ID}/rollback/${production_id}?teamId=${VERCEL_TEAM_ID}'"
+rollback_hint
