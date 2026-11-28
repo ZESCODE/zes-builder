@@ -7,16 +7,16 @@ describe('security middleware', () => {
   });
 
   describe('checkRateLimit', () => {
-    it('allows requests within the limit', () => {
+    it('allows requests within the limit', async () => {
       const request = new Request('https://example.com/api/test', {
         headers: { 'x-real-ip': '192.168.1.1' },
       });
 
-      const result = checkRateLimit(request, '/api/test', { clientAddress: '192.168.1.1' });
+      const result = await checkRateLimit(request, '/api/test', { clientAddress: '192.168.1.1' });
       expect(result.allowed).toBe(true);
     });
 
-    it('matches exact endpoints before wildcard rules', () => {
+    it('matches exact endpoints before wildcard rules', async () => {
       const ip = '10.0.0.1';
 
       const chatRequest = new Request('https://example.com/api/chat', {
@@ -24,11 +24,11 @@ describe('security middleware', () => {
       });
 
       // The first request to /api/chat should be allowed
-      const result = checkRateLimit(chatRequest, '/api/chat', { clientAddress: ip });
+      const result = await checkRateLimit(chatRequest, '/api/chat', { clientAddress: ip });
       expect(result.allowed).toBe(true);
     });
 
-    it('blocks requests once rate limit is exceeded', () => {
+    it('blocks requests once rate limit is exceeded', async () => {
       const ip = '10.0.0.99';
 
       const request = new Request('https://example.com/api/llmcall', {
@@ -37,36 +37,36 @@ describe('security middleware', () => {
 
       // /api/llmcall has a limit of 30
       for (let i = 0; i < 30; i++) {
-        const res = checkRateLimit(request, '/api/llmcall', { clientAddress: ip });
+        const res = await checkRateLimit(request, '/api/llmcall', { clientAddress: ip });
         expect(res.allowed).toBe(true);
       }
 
       // 31st request should be blocked
-      const blocked = checkRateLimit(request, '/api/llmcall', { clientAddress: ip });
+      const blocked = await checkRateLimit(request, '/api/llmcall', { clientAddress: ip });
       expect(blocked.allowed).toBe(false);
       expect(blocked.resetTime).toBeGreaterThan(Date.now());
     });
 
-    it('does not use caller-supplied forwarding headers as a trusted identity', () => {
+    it('does not use caller-supplied forwarding headers as a trusted identity', async () => {
       const request = new Request('https://example.com/api/chat', {
         headers: { 'x-forwarded-for': '203.0.113.9', 'x-real-ip': '203.0.113.9' },
       });
 
-      expect(checkRateLimit(request, '/api/chat')).toEqual({ allowed: false, unavailable: true });
+      expect(await checkRateLimit(request, '/api/chat')).toEqual({ allowed: false, unavailable: true });
     });
 
     describe('on the Vercel edge', () => {
-      it('uses the last forwarded-for entry, which is the one the platform appended', () => {
+      it('uses the last forwarded-for entry, which is the one the platform appended', async () => {
         vi.stubEnv('VERCEL', '1');
 
         const request = new Request('https://example.com/api/chat', {
           headers: { 'x-forwarded-for': '203.0.113.9, 198.51.100.7' },
         });
 
-        expect(checkRateLimit(request, '/api/chat')).toEqual({ allowed: true });
+        expect(await checkRateLimit(request, '/api/chat')).toEqual({ allowed: true });
       });
 
-      it('keeps a caller supplied first entry out of the rate limit key', () => {
+      it('keeps a caller supplied first entry out of the rate limit key', async () => {
         vi.stubEnv('VERCEL', '1');
 
         const spoofed = new Request('https://example.com/api/chat', {
@@ -81,43 +81,43 @@ describe('security middleware', () => {
          * first entry of the chain and get an unlimited budget.
          */
         for (let i = 0; i < 60; i++) {
-          checkRateLimit(spoofed, '/api/chat');
+          await checkRateLimit(spoofed, '/api/chat');
         }
 
-        expect(checkRateLimit(direct, '/api/chat').allowed).toBe(false);
+        expect((await checkRateLimit(direct, '/api/chat')).allowed).toBe(false);
       });
 
-      it('falls back to x-real-ip when there is no forwarded-for chain', () => {
+      it('falls back to x-real-ip when there is no forwarded-for chain', async () => {
         vi.stubEnv('VERCEL', '1');
 
         const request = new Request('https://example.com/api/chat', {
           headers: { 'x-real-ip': '198.51.100.8' },
         });
 
-        expect(checkRateLimit(request, '/api/chat')).toEqual({ allowed: true });
+        expect(await checkRateLimit(request, '/api/chat')).toEqual({ allowed: true });
       });
 
-      it('still fails closed when the platform sends no address at all', () => {
+      it('still fails closed when the platform sends no address at all', async () => {
         vi.stubEnv('VERCEL', '1');
 
         const request = new Request('https://example.com/api/chat');
 
-        expect(checkRateLimit(request, '/api/chat')).toEqual({ allowed: false, unavailable: true });
+        expect(await checkRateLimit(request, '/api/chat')).toEqual({ allowed: false, unavailable: true });
       });
 
-      it('ignores the platform headers outside Vercel', () => {
+      it('ignores the platform headers outside Vercel', async () => {
         vi.stubEnv('VERCEL', '');
 
         const request = new Request('https://example.com/api/chat', {
           headers: { 'x-forwarded-for': '198.51.100.7', 'x-real-ip': '198.51.100.7' },
         });
 
-        expect(checkRateLimit(request, '/api/chat')).toEqual({ allowed: false, unavailable: true });
+        expect(await checkRateLimit(request, '/api/chat')).toEqual({ allowed: false, unavailable: true });
       });
     });
 
     describe('the deploy proxy', () => {
-      it('uses its own budget instead of the generic fallback', () => {
+      it('uses its own budget instead of the generic fallback', async () => {
         const ip = '198.51.100.42';
 
         const request = new Request('https://example.com/api/vercel-deploy', {
@@ -127,10 +127,10 @@ describe('security middleware', () => {
 
         // 20 requests per minute for /api/vercel-deploy
         for (let i = 0; i < 20; i++) {
-          expect(checkRateLimit(request, '/api/vercel-deploy', { clientAddress: ip }).allowed).toBe(true);
+          expect((await checkRateLimit(request, '/api/vercel-deploy', { clientAddress: ip })).allowed).toBe(true);
         }
 
-        const blocked = checkRateLimit(request, '/api/vercel-deploy', { clientAddress: ip });
+        const blocked = await checkRateLimit(request, '/api/vercel-deploy', { clientAddress: ip });
         expect(blocked.allowed).toBe(false);
         expect(blocked.unavailable).toBeUndefined();
       });

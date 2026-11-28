@@ -253,7 +253,7 @@ export default function VercelTab() {
       const userData = (await testResponse.json()) as VercelUserResponse;
 
       // Set cookies for server-side API access
-      setSecureCookie('VITE_VERCEL_ACCESS_TOKEN', token, { expires: 365 });
+      setSecureCookie('VERCEL_ACCESS_TOKEN', token, { expires: 365 });
 
       // Normalize the user data structure
       const normalizedUser = userData.user || {
@@ -285,6 +285,7 @@ export default function VercelTab() {
 
   const handleDisconnect = () => {
     // Clear Vercel-related cookies
+    removeSecureCookie('VERCEL_ACCESS_TOKEN');
     removeSecureCookie('VITE_VERCEL_ACCESS_TOKEN');
 
     updateVercelConnection({ user: null, token: '' });

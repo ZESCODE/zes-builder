@@ -1,9 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router';
+import { getRateLimitStore } from './rate-limit-store';
 
-// Rate limiting store (in-memory for serverless environments)
-const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
-
-// Rate limit configuration
+// Rate limiting configuration
 const RATE_LIMITS: Record<string, { windowMs: number; maxRequests: number }> = {
   // LLM streaming and call APIs (most restrictive)
   '/api/chat': { windowMs: 60 * 1000, maxRequests: 60 }, // 60 requests per minute
@@ -28,18 +26,16 @@ const RATE_LIMITS: Record<string, { windowMs: number; maxRequests: number }> = {
 /**
  * Rate limiting middleware
  */
-export function checkRateLimit(
+export async function checkRateLimit(
   request: Request,
   endpoint: string,
   context?: unknown,
-): { allowed: boolean; resetTime?: number; unavailable?: boolean } {
+): Promise<{ allowed: boolean; resetTime?: number; unavailable?: boolean }> {
   const clientIP = getTrustedClientIP(request, context);
 
   if (!clientIP) {
     return { allowed: false, unavailable: true };
   }
-
-  const key = `${clientIP}:${endpoint}`;
 
   // Find matching rate limit rule: exact match first, then specific prefix, then generic wildcard
   const entries = Object.entries(RATE_LIMITS);
@@ -68,32 +64,25 @@ export function checkRateLimit(
   }
 
   const [, config] = rule;
-  const now = Date.now();
 
-  // Clean up old entries periodically to avoid O(N) cost on every single request
-  if (rateLimitStore.size > 200) {
-    for (const [storedKey, data] of rateLimitStore.entries()) {
-      if (data.resetTime < now) {
-        rateLimitStore.delete(storedKey);
-      }
+  try {
+    const entry = await getRateLimitStore().hit(`${clientIP}:${endpoint}`, config.windowMs);
+
+    if (entry.count > config.maxRequests) {
+      return { allowed: false, resetTime: entry.resetTime };
     }
+
+    return { allowed: true };
+  } catch (error) {
+    /*
+     * The limiter protects capacity, it is not an authorisation gate: a store
+     * outage must not turn every route into a 503 again. The request is
+     * allowed and the failure is logged.
+     */
+    console.error('the rate limit store is unavailable, the request is allowed:', error);
+
+    return { allowed: true };
   }
-
-  // Get or create rate limit data
-  const existing = rateLimitStore.get(key);
-
-  const rateLimitData =
-    existing && existing.resetTime > now ? existing : { count: 0, resetTime: now + config.windowMs };
-
-  if (rateLimitData.count >= config.maxRequests) {
-    return { allowed: false, resetTime: rateLimitData.resetTime };
-  }
-
-  // Update rate limit data
-  rateLimitData.count++;
-  rateLimitStore.set(key, rateLimitData);
-
-  return { allowed: true };
 }
 
 /**
@@ -439,7 +428,7 @@ export function withSecurity<T extends (args: ActionFunctionArgs | LoaderFunctio
 
     // Apply rate limiting
     if (options.rateLimit !== false) {
-      const rateLimitResult = checkRateLimit(request, endpoint, args.context);
+      const rateLimitResult = await checkRateLimit(request, endpoint, args.context);
 
       if (rateLimitResult.unavailable) {
         return new Response('Rate limiting requires trusted client IP configuration', {

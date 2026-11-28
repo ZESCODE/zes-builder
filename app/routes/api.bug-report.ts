@@ -1,10 +1,11 @@
 import { Octokit } from '@octokit/rest';
 import type { ActionFunctionArgs } from 'react-router';
 import { z } from 'zod';
+import { getRateLimitStore } from '~/lib/rate-limit-store';
 import { getTrustedClientIP } from '~/lib/security';
 
-// Rate limiting store (in production, use Redis or similar)
-const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
+// Max 5 reports per hour per IP
+const BUG_REPORT_LIMIT = { windowMs: 60 * 60 * 1000, maxRequests: 5 };
 
 // Input validation schema
 const bugReportSchema = z.object({
@@ -41,26 +42,16 @@ function sanitizeInput(input: string): string {
 }
 
 // Rate limiting check
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now();
-  const key = ip;
-  const limit = rateLimitStore.get(key);
+async function checkRateLimit(ip: string): Promise<boolean> {
+  try {
+    const entry = await getRateLimitStore().hit(`bug-report:${ip}`, BUG_REPORT_LIMIT.windowMs);
 
-  if (!limit || now > limit.resetTime) {
-    // Reset window (1 hour)
-    rateLimitStore.set(key, { count: 1, resetTime: now + 60 * 60 * 1000 });
+    return entry.count <= BUG_REPORT_LIMIT.maxRequests;
+  } catch (error) {
+    console.error('the rate limit store is unavailable, the bug report is accepted:', error);
+
     return true;
   }
-
-  if (limit.count >= 5) {
-    // Max 5 reports per hour per IP
-    return false;
-  }
-
-  limit.count += 1;
-  rateLimitStore.set(key, limit);
-
-  return true;
 }
 
 // Basic spam detection
@@ -150,7 +141,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       );
     }
 
-    if (!checkRateLimit(clientIP)) {
+    if (!(await checkRateLimit(clientIP))) {
       return Response.json(
         { error: 'Rate limit exceeded. Please wait before submitting another report.' },
         { status: 429 },
