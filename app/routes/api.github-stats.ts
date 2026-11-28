@@ -1,4 +1,4 @@
-import { getApiKeysFromCookie } from '~/lib/api/cookies';
+import { getApiKeysFromCookie, getCookieValue } from '~/lib/api/cookies';
 import { withSecurity } from '~/lib/security';
 import type { GitHubUserResponse, GitHubStats } from '~/types/GitHub';
 
@@ -12,6 +12,7 @@ async function githubStatsLoader({ request, context }: { request: Request; conte
     const githubToken =
       apiKeys.GITHUB_API_KEY ||
       apiKeys.VITE_GITHUB_ACCESS_TOKEN ||
+      getCookieValue(cookieHeader, 'githubToken') ||
       context?.cloudflare?.env?.GITHUB_TOKEN ||
       context?.cloudflare?.env?.VITE_GITHUB_ACCESS_TOKEN ||
       process.env.GITHUB_TOKEN ||

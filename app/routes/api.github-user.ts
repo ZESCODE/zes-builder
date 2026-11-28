@@ -1,4 +1,4 @@
-import { getApiKeysFromCookie } from '~/lib/api/cookies';
+import { getApiKeysFromCookie, getCookieValue } from '~/lib/api/cookies';
 import { withSecurity } from '~/lib/security';
 
 async function githubUserLoader({ request, context }: { request: Request; context: any }) {
@@ -11,6 +11,7 @@ async function githubUserLoader({ request, context }: { request: Request; contex
     const githubToken =
       apiKeys.GITHUB_API_KEY ||
       apiKeys.VITE_GITHUB_ACCESS_TOKEN ||
+      getCookieValue(cookieHeader, 'githubToken') ||
       context?.cloudflare?.env?.GITHUB_TOKEN ||
       context?.cloudflare?.env?.VITE_GITHUB_ACCESS_TOKEN ||
       process.env.GITHUB_TOKEN ||
@@ -101,6 +102,7 @@ async function githubUserAction({ request, context }: { request: Request; contex
     const githubToken =
       apiKeys.GITHUB_API_KEY ||
       apiKeys.VITE_GITHUB_ACCESS_TOKEN ||
+      getCookieValue(cookieHeader, 'githubToken') ||
       context?.cloudflare?.env?.GITHUB_TOKEN ||
       context?.cloudflare?.env?.VITE_GITHUB_ACCESS_TOKEN ||
       process.env.GITHUB_TOKEN ||

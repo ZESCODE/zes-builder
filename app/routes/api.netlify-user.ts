@@ -1,4 +1,4 @@
-import { getApiKeysFromCookie } from '~/lib/api/cookies';
+import { getApiKeysFromCookie, getCookieValue } from '~/lib/api/cookies';
 import { withSecurity } from '~/lib/security';
 
 async function netlifyUserLoader({ request, context }: { request: Request; context: any }) {
@@ -10,6 +10,7 @@ async function netlifyUserLoader({ request, context }: { request: Request; conte
     // Try to get Netlify token from various sources
     const netlifyToken =
       apiKeys.VITE_NETLIFY_ACCESS_TOKEN ||
+      getCookieValue(cookieHeader, 'netlifyToken') ||
       context?.cloudflare?.env?.VITE_NETLIFY_ACCESS_TOKEN ||
       process.env.VITE_NETLIFY_ACCESS_TOKEN;
 
@@ -77,6 +78,7 @@ async function netlifyUserAction({ request, context }: { request: Request; conte
     // Try to get Netlify token from various sources
     const netlifyToken =
       apiKeys.VITE_NETLIFY_ACCESS_TOKEN ||
+      getCookieValue(cookieHeader, 'netlifyToken') ||
       context?.cloudflare?.env?.VITE_NETLIFY_ACCESS_TOKEN ||
       process.env.VITE_NETLIFY_ACCESS_TOKEN;
 

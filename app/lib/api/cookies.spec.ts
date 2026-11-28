@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { safeJsonParse, parseCookies, getApiKeysFromCookie, getProviderSettingsFromCookie } from './cookies';
+import {
+  safeJsonParse,
+  parseCookies,
+  getApiKeysFromCookie,
+  getCookieValue,
+  getProviderSettingsFromCookie,
+} from './cookies';
 
 describe('cookies utilities', () => {
   describe('safeJsonParse', () => {
@@ -53,6 +59,22 @@ describe('cookies utilities', () => {
     it('returns empty object if apiKeys cookie is missing or malformed', () => {
       expect(getApiKeysFromCookie(null)).toEqual({});
       expect(getApiKeysFromCookie('apiKeys=corrupted_non_json')).toEqual({});
+    });
+  });
+
+  describe('getCookieValue', () => {
+    it('reads a standalone cookie by name', () => {
+      expect(getCookieValue('githubToken=abc123; theme=dark', 'githubToken')).toBe('abc123');
+    });
+
+    it('decodes the cookie value', () => {
+      expect(getCookieValue('vercelToken=a%20b', 'vercelToken')).toBe('a b');
+    });
+
+    it('returns undefined for a missing cookie, an empty value or a missing header', () => {
+      expect(getCookieValue('theme=dark', 'githubToken')).toBeUndefined();
+      expect(getCookieValue('githubToken=', 'githubToken')).toBeUndefined();
+      expect(getCookieValue(null, 'githubToken')).toBeUndefined();
     });
   });
 
